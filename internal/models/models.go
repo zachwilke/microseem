@@ -10,6 +10,7 @@ import (
 type Tenant struct {
 	ID                  uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	Name                string         `json:"name"`
+	ContactEmail        string         `json:"contact_email"`
 	TenantID            string         `json:"tenant_id"`
 	ClientID            string         `json:"client_id"`
 	ClientSecret        string         `json:"client_secret"` // In a real app, encrypt this!
@@ -35,4 +36,13 @@ type AuditLog struct {
 	Latitude     float64        `json:"latitude"`
 	Longitude    float64        `json:"longitude"`
 	IngestedAt   time.Time      `json:"ingested_at"`
+}
+
+type Investigation struct {
+	ID          uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Filters     datatypes.JSON `gorm:"type:jsonb" json:"filters"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }

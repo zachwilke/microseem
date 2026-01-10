@@ -4,15 +4,20 @@ import axios from 'axios';
 const API_URL = 'http://localhost:8080/api';
 
 interface Tenant {
+    ID: string;
     name: string;
     tenant_id: string;
+    contact_email?: string; // Added
+    enabled_content_types?: string[];
+    verbosity?: string;
 }
 
 const Settings: React.FC = () => {
-    const [tenants, setTenants] = useState<any[]>([]);
+    const [tenants, setTenants] = useState<Tenant[]>([]);
     const [formData, setFormData] = useState({
         name: '',
         tenant_id: '',
+        contact_email: '', // Added
         client_id: '',
         client_secret: ''
     });
@@ -34,7 +39,7 @@ const Settings: React.FC = () => {
         try {
             await axios.post(`${API_URL}/tenants`, formData);
             await loadTenants();
-            setFormData({ name: '', tenant_id: '', client_id: '', client_secret: '' }); // Reset
+            setFormData({ name: '', tenant_id: '', contact_email: '', client_id: '', client_secret: '' }); // Reset
         } catch (e: any) {
             alert("Error adding tenant: " + e.message);
         } finally {
@@ -42,52 +47,39 @@ const Settings: React.FC = () => {
         }
     };
 
-    const updateTenantConfig = async (tenantId: string, enabledTypes: string[], verbosity: string) => {
-        // Need ID to update. Assuming API supports update by ID or we just strictly assume we can use this endpoint.
-        // Wait, current API might not have Update route? 
-        // We will assume a PUT /tenants/{id} or similar exists or we implement it.
-        // Actually, let's check tasks. Config updates needed.
-        // For now, let's implement the UI and simple state update, anticipating API.
+    const updateTenantConfig = async (tenantId: string, enabledTypes: string[], verbosity: string, contactEmail?: string) => {
+        // Optimistic UI Update
+        setTenants(prev => prev.map(t =>
+            t.ID === tenantId ? { ...t, enabled_content_types: enabledTypes, verbosity, contact_email: contactEmail || t.contact_email } : t
+        ));
 
-        // Mock update locally for UI responsiveness
-        setTenants(prev => prev.map(t => t.ID === tenantId ? { ...t, enabled_content_types: enabledTypes, verbosity } : t));
-
-        // Real API Call (Proposed)
-        /*
         try {
             await axios.put(`${API_URL}/tenants/${tenantId}`, {
                 enabled_content_types: enabledTypes,
-                verbosity: verbosity
-            });
-        } catch (e) {
-            alert("Failed to save config");
-        }
-        */
-        // IMPORTANT: Since we didn't add the PUT route yet, I'll add it in the next step. 
-        // Just marking this as TODO in the UI logic.
-        try {
-            // We'll post to a generic update endpoint or use existing if adaptable.
-            // Actually, let's create a specific update route next.
-            await axios.put(`${API_URL}/tenants/${tenantId}`, {
-                enabled_content_types: enabledTypes,
-                verbosity: verbosity
+                verbosity: verbosity,
+                contact_email: contactEmail
             });
         } catch (e) {
             console.error("Update failed", e);
+            // Revert or alert on failure in a real app
         }
     };
 
-    const toggleContentType = (tenant: any, type: string) => {
+    const toggleContentType = (tenant: Tenant, type: string) => {
         const current = tenant.enabled_content_types || [];
         const newTypes = current.includes(type)
             ? current.filter((t: string) => t !== type)
             : [...current, type];
-        updateTenantConfig(tenant.ID, newTypes, tenant.verbosity || 'Standard');
+        updateTenantConfig(tenant.ID, newTypes, tenant.verbosity || 'Standard', tenant.contact_email);
     };
 
-    const setVerbosity = (tenant: any, v: string) => {
-        updateTenantConfig(tenant.ID, tenant.enabled_content_types || [], v);
+    const setVerbosity = (tenant: Tenant, v: string) => {
+        updateTenantConfig(tenant.ID, tenant.enabled_content_types || [], v, tenant.contact_email);
     };
+
+    const updateContactEmail = (tenant: Tenant, email: string) => {
+        updateTenantConfig(tenant.ID, tenant.enabled_content_types || [], tenant.verbosity || 'Standard', email);
+    }
 
     useEffect(() => {
         loadTenants();
@@ -124,6 +116,18 @@ const Settings: React.FC = () => {
                             value={formData.tenant_id}
                             onChange={(e) => setFormData({ ...formData, tenant_id: e.target.value })}
                             placeholder="Azure Tenant ID"
+                            className="input-field"
+                            required
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Contact Email</label>
+                        <input
+                            type="email"
+                            value={formData.contact_email}
+                            onChange={(e) => setFormData({ ...formData, contact_email: e.target.value })}
+                            placeholder="admin@example.com"
                             className="input-field"
                             required
                         />
@@ -177,6 +181,7 @@ const Settings: React.FC = () => {
                                 <div>
                                     <h3 className="font-bold text-lg text-white hover:text-blue-400 transition-colors">{tenant.name}</h3>
                                     <p className="text-xs text-slate-500 font-mono mt-1">{tenant.tenant_id}</p>
+                                    {tenant.contact_email && <p className="text-xs text-slate-400 mt-1">{tenant.contact_email}</p>}
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span className="px-2 py-1 text-xs rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Active</span>
@@ -188,6 +193,16 @@ const Settings: React.FC = () => {
                             {expandedTenant === tenant.ID && (
                                 <div className="mt-4 pt-4 border-t border-white/5 animate-in fade-in slide-in-from-top-2">
                                     <div className="grid gap-4">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase">Contact Email</label>
+                                            <input
+                                                type="email"
+                                                className="bg-slate-900 border border-slate-700 text-slate-300 text-sm rounded px-3 py-2 w-full focus:ring-1 focus:ring-blue-500 outline-none"
+                                                value={tenant.contact_email || ''}
+                                                onChange={(e) => updateContactEmail(tenant, e.target.value)}
+                                                onBlur={(e) => updateContactEmail(tenant, e.target.value)} // Ensure save on blur as well
+                                            />
+                                        </div>
                                         <div>
                                             <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase">Audit Content Types</label>
                                             <div className="flex flex-wrap gap-2">

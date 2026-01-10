@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"os"
@@ -30,6 +31,8 @@ type Job struct {
 }
 
 var manualTrigger = make(chan struct{}, 1)
+var ingestCounter uint64
+var errorCounter uint64
 
 func TriggerPoll() {
 	select {
@@ -63,6 +66,36 @@ func StartPoller() {
 	}
 
 	ticker := time.NewTicker(5 * time.Minute)
+
+	// Health Reporter
+	go func() {
+		rateTicker := time.NewTicker(2 * time.Second)
+		defer rateTicker.Stop()
+		for range rateTicker.C {
+			count := atomic.SwapUint64(&ingestCounter, 0)
+			errCount := atomic.SwapUint64(&errorCounter, 0)
+
+			// Calculate rate (logs per minute)
+			rate := float64(count) * 30.0
+			errorRate := float64(errCount) * 30.0
+
+			// Calculate Lag
+			var maxLagSeconds float64
+			var oldestTenant models.Tenant
+			// Find tenant with oldest LastPoll from DB
+			// We only care about tenants that have polling enabled (implied by existence in loop, but let's query)
+			if err := database.DB.Order("last_poll asc").Where("last_poll > '2000-01-01'").First(&oldestTenant).Error; err == nil {
+				lag := time.Since(oldestTenant.LastPoll)
+				maxLagSeconds = lag.Seconds()
+			}
+
+			hub.GlobalHub.BroadcastHealth(map[string]interface{}{
+				"ingest_rate": rate,
+				"error_rate":  errorRate,
+				"lag_seconds": maxLagSeconds,
+			})
+		}
+	}()
 
 	// Initial Poll
 	go func() {
@@ -148,6 +181,7 @@ func processJob(workerId int, job Job) {
 	token, err := client.GetAccessToken()
 	if err != nil {
 		log.Printf("[Worker %d] Failed to auth tenant %s: %v", workerId, job.Tenant.Name, err)
+		atomic.AddUint64(&errorCounter, 1)
 		return
 	}
 
@@ -169,6 +203,7 @@ func processJob(workerId int, job Job) {
 			}
 		} else {
 			log.Printf("[Worker %d] Error listing %s for %s: %v", workerId, job.ContentType, job.Tenant.Name, err)
+			atomic.AddUint64(&errorCounter, 1)
 			return
 		}
 	}
@@ -215,6 +250,9 @@ func saveBatch(logs []models.AuditLog) {
 	for _, l := range logs {
 		alerting.Engine.Evaluate(l)
 	}
+
+	// Update Ingest Rate Counter
+	atomic.AddUint64(&ingestCounter, uint64(len(logs)))
 }
 
 func buildAuditLog(t models.Tenant, raw map[string]interface{}, workload string) *models.AuditLog {

@@ -7,6 +7,8 @@ import LogInspector from './components/LogInspector';
 import WorldMap from './components/WorldMap';
 import Alerts from './components/Alerts';
 import Settings from './components/Settings';
+import Investigations from './components/Investigations';
+import InvestigationDetail from './components/InvestigationDetail';
 
 function App() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -56,6 +58,16 @@ function App() {
                             <div className="flex-1 min-h-0 bg-slate-800 rounded-xl overflow-hidden border border-white/5 shadow-2xl">
                                 <WorldMap />
                             </div>
+                        </div>
+                    } />
+                    <Route path="/investigations" element={
+                        <div className="animate-in fade-in duration-300">
+                            <Investigations />
+                        </div>
+                    } />
+                    <Route path="/investigations/:id" element={
+                        <div className="animate-in fade-in duration-300">
+                            <InvestigationDetail />
                         </div>
                     } />
                     <Route path="/alerts" element={

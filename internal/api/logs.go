@@ -38,6 +38,12 @@ func ListLogs(w http.ResponseWriter, r *http.Request) {
 		Order("audit_logs.creation_time desc").
 		Limit(100)
 
+	// Tenant Filter
+	tenantID := r.URL.Query().Get("tenant_id")
+	if tenantID != "" {
+		query = query.Where("audit_logs.tenant_id = ?", tenantID)
+	}
+
 	// Date Range Params
 	startDate := r.URL.Query().Get("start")
 	endDate := r.URL.Query().Get("end")

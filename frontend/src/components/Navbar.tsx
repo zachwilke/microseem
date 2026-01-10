@@ -15,6 +15,7 @@ const Navbar: React.FC<NavbarProps> = ({ isOpen, onToggle }) => {
         if (path.startsWith('/live')) return 'livelogs';
         if (path.startsWith('/inspector')) return 'inspector';
         if (path.startsWith('/map')) return 'map';
+        if (path.startsWith('/investigations')) return 'investigations';
         if (path.startsWith('/alerts')) return 'alerts';
         if (path.startsWith('/settings')) return 'settings';
         return 'dashboard';
@@ -44,6 +45,11 @@ const Navbar: React.FC<NavbarProps> = ({ isOpen, onToggle }) => {
             )
         },
         {
+            id: 'investigations', path: '/investigations', label: 'Investigations', icon: (
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+            )
+        },
+        {
             id: 'alerts', path: '/alerts', label: 'Threats', icon: (
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
             )
@@ -64,13 +70,13 @@ const Navbar: React.FC<NavbarProps> = ({ isOpen, onToggle }) => {
                 {isOpen ? (
                     <div className="flex items-center gap-3 overflow-hidden whitespace-nowrap">
                         <div className="relative h-8 w-8 rounded-lg bg-slate-900 flex items-center justify-center border border-white/10 flex-shrink-0">
-                            <span className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">S</span>
+                            <span className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">M</span>
                         </div>
-                        <span className="font-bold text-white tracking-tight">O365 Monitor</span>
+                        <span className="font-bold text-white tracking-tight">MicroSeem</span>
                     </div>
                 ) : (
                     <div className="relative h-8 w-8 rounded-lg bg-slate-900 flex items-center justify-center border border-white/10">
-                        <span className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">S</span>
+                        <span className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">M</span>
                     </div>
                 )}
 

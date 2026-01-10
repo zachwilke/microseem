@@ -75,9 +75,9 @@ func (c *Client) GetAccessToken() (string, error) {
 
 // ListAvailableContent gets the list of Available Content blobs for a content type (Audit.AzureActiveDirectory, Audit.Exchange, etc)
 func (c *Client) ListAvailableContent(token string, contentType string, startTime, endTime time.Time) ([]ContentBlob, error) {
-	// Format: YYYY-MM-DDTHH:MM:SS
-	startStr := startTime.Format("2006-01-02T15:04:05")
-	endStr := endTime.Format("2006-01-02T15:04:05")
+	// Format: YYYY-MM-DDTHH:MM:SS (API assumes UTC)
+	startStr := startTime.UTC().Format("2006-01-02T15:04:05")
+	endStr := endTime.UTC().Format("2006-01-02T15:04:05")
 
 	reqURL := fmt.Sprintf("%s/api/v1.0/%s/activity/feed/subscriptions/content?contentType=%s&startTime=%s&endTime=%s",
 		ResourceAPI, c.TenantID, contentType, startStr, endStr)

@@ -13,7 +13,19 @@ import (
 func RegisterTenantRoutes(r chi.Router) {
 	r.Post("/tenants", CreateTenant)
 	r.Get("/tenants", ListTenants)
+	r.Get("/tenants/{id}", GetTenantByID)
 	r.Put("/tenants/{id}", UpdateTenant)
+}
+
+func GetTenantByID(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var tenant models.Tenant
+	if err := database.DB.First(&tenant, "id = ?", id).Error; err != nil {
+		http.Error(w, "Tenant not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tenant)
 }
 
 func CreateTenant(w http.ResponseWriter, r *http.Request) {
@@ -62,9 +74,12 @@ func UpdateTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update allowed fields (avoid overwriting secrets unless intended)
+	// Update allowed fields
 	tenant.EnabledContentTypes = req.EnabledContentTypes
 	tenant.Verbosity = req.Verbosity
+	if req.ContactEmail != "" {
+		tenant.ContactEmail = req.ContactEmail
+	}
 
 	if err := database.DB.Save(&tenant).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

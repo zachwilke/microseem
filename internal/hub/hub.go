@@ -123,6 +123,19 @@ func (h *Hub) BroadcastAlert(alert models.Alert) {
 	}()
 }
 
+func (h *Hub) BroadcastRate(rate float64) {
+	// Deprecated in favor of health
+}
+
+func (h *Hub) BroadcastHealth(stats map[string]interface{}) {
+	go func() {
+		h.broadcast <- map[string]interface{}{
+			"type":    "health",
+			"payload": stats,
+		}
+	}()
+}
+
 // ServeWS handles websocket requests from the peer.
 func ServeWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)

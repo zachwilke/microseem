@@ -49,6 +49,7 @@ func main() {
 		api.RegisterTenantRoutes(r)
 		api.RegisterLogRoutes(r)
 		api.RegisterAlertRoutes(r)
+		api.RegisterInvestigationRoutes(r)
 		r.Get("/stats", api.GetStats)
 		r.Get("/ws", hub.ServeWS)
 	})
