@@ -1,52 +1,117 @@
 version: '3.8'
 
 services:
+  # ===================
+  # Frontend (React)
+  # ===================
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080/api}
+        VITE_KIBANA_URL: ${VITE_KIBANA_URL:-http://localhost:5601}
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - microseem
+
+  # ===================
+  # Backend API (Go)
+  # ===================
+  api:
+    build: .
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=host=postgres user=${POSTGRES_USER:-microseem} password=${POSTGRES_PASSWORD:-microseem_secret} dbname=${POSTGRES_DB:-microseem} port=5432 sslmode=disable
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - KAFKA_BROKERS=kafka:9092
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      - GEOIP_DB_PATH=/app/GeoLite2-City.mmdb
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - microseem
+
+  # ===================
   # PostgreSQL Database
+  # ===================
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: o365_user
-      POSTGRES_PASSWORD: o365_password
-      POSTGRES_DB: o365_monitor
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-microseem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-microseem_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-microseem}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U o365_user -d o365_monitor"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-microseem} -d ${POSTGRES_DB:-microseem}"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - microseem
 
+  # ===================
   # Elasticsearch
+  # ===================
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    ports:
-      - "9200:9200"
+      - "ES_JAVA_OPTS=-Xms${ES_HEAP_SIZE:-512m} -Xmx${ES_HEAP_SIZE:-512m}"
+      - cluster.name=microseem
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q 'status.*green\\|yellow'"]
-      interval: 30s
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
       timeout: 10s
-      retries: 5
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - microseem
 
-  # Kibana (optional - for analytics)
+  # ===================
+  # Kibana (Analytics UI)
+  # ===================
   kibana:
     image: docker.elastic.co/kibana/kibana:8.12.0
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=microseem-kibana
     ports:
-      - "5601:5601"
+      - "${KIBANA_PORT:-5601}:5601"
     depends_on:
       elasticsearch:
         condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - microseem
 
-  # Kafka (using KRaft mode - no Zookeeper needed)
+  # ===================
+  # Kafka (Message Queue)
+  # ===================
   kafka:
     image: bitnami/kafka:3.6
     environment:
@@ -56,37 +121,23 @@ services:
       - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
       - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
       - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
-    ports:
-      - "9092:9092"
+      - KAFKA_CFG_LOG_RETENTION_HOURS=${KAFKA_RETENTION_HOURS:-168}
     volumes:
       - kafka_data:/bitnami/kafka
     healthcheck:
-      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
-      interval: 30s
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
       timeout: 10s
-      retries: 5
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - microseem
 
-  # Backend API (optional - can run locally for development)
-  # api:
-  #   build: .
-  #   ports:
-  #     - "8080:8080"
-  #   environment:
-  #     - DATABASE_URL=host=postgres user=o365_user password=o365_password dbname=o365_monitor port=5432 sslmode=disable
-  #     - ELASTICSEARCH_URL=http://elasticsearch:9200
-  #     - KAFKA_BROKERS=kafka:9092
-  #     - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
-  #     - CLERK_FRONTEND_API=${CLERK_FRONTEND_API}
-  #     - ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     elasticsearch:
-  #       condition: service_healthy
-  #     kafka:
-  #       condition: service_healthy
+networks:
+  microseem:
+    driver: bridge
 
 volumes:
   postgres_data:

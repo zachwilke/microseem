@@ -1,0 +1,68 @@
+# Environment files (contain secrets!)
+.env
+.env.local
+.env.*.local
+
+# GeoIP Database (large binary file)
+*.mmdb
+
+# Build outputs
+/server
+/bin/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker volumes (if stored locally)
+data/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Test coverage
+coverage/
+*.cover
+*.coverage
+
+# Compiled binaries
+microseem
+
+# Backup files
+*.bak
+*.backup
+
+# SSL certificates (if stored locally)
+*.pem
+*.key
+*.crt
+*.csr

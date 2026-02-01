@@ -22,27 +22,26 @@ FROM alpine:3.19
 WORKDIR /app
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata wget
+RUN apk add --no-cache ca-certificates tzdata curl
 
 # Copy binary from builder
 COPY --from=builder /server /app/server
 
-# Copy GeoIP database if it exists (optional)
-# Note: If GeoLite2-City.mmdb doesn't exist, comment out this line
-# or mount it as a volume at runtime
-COPY --from=builder /app/GeoLite2-City.mmdb* /app/
-
 # Create non-root user
 RUN adduser -D -g '' appuser && \
     chown -R appuser:appuser /app
+
+# Create empty GeoIP file if not provided (makes it optional)
+RUN touch /app/GeoLite2-City.mmdb
+
 USER appuser
 
 # Expose port (configurable via PORT env var)
 EXPOSE 8080
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT:-8080}/health || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -sf http://localhost:${PORT:-8080}/health || exit 1
 
 # Run the binary
 CMD ["/app/server"]

@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-
-const API_URL = 'http://localhost:8080/api';
+import api from '../lib/api';
 
 interface Tenant {
     ID: string;
@@ -26,7 +24,7 @@ const Settings: React.FC = () => {
 
     const loadTenants = async () => {
         try {
-            const res = await axios.get(`${API_URL}/tenants`);
+            const res = await api.get('/tenants');
             setTenants(res.data || []);
         } catch (e) {
             console.error("Failed to load tenants", e);
@@ -37,7 +35,7 @@ const Settings: React.FC = () => {
         e.preventDefault();
         setIsLoading(true);
         try {
-            await axios.post(`${API_URL}/tenants`, formData);
+            await api.post('/tenants', formData);
             await loadTenants();
             setFormData({ name: '', tenant_id: '', contact_email: '', client_id: '', client_secret: '' }); // Reset
         } catch (e: any) {
@@ -54,7 +52,7 @@ const Settings: React.FC = () => {
         ));
 
         try {
-            await axios.put(`${API_URL}/tenants/${tenantId}`, {
+            await api.put(`/tenants/${tenantId}`, {
                 enabled_content_types: enabledTypes,
                 verbosity: verbosity,
                 contact_email: contactEmail

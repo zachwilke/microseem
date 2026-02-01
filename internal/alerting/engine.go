@@ -9,6 +9,7 @@ import (
 	"github.com/socr/o365-monitor/internal/database"
 	"github.com/socr/o365-monitor/internal/hub"
 	"github.com/socr/o365-monitor/internal/models"
+	"github.com/socr/o365-monitor/internal/notifications"
 )
 
 var Engine = &AlertEngine{
@@ -124,5 +125,9 @@ func (e *AlertEngine) Trigger(rule models.AlertRule, logEntry models.AuditLog, o
 
 	// Broadcast via WebSocket to the correct org room
 	hub.GlobalHub.BroadcastAlert(alert, orgID)
+
+	// Send notifications to configured integrations
+	notifications.NotifyAlert(alert)
+
 	log.Printf("ALERT TRIGGERED: %s for %s (org: %s)", rule.Name, logEntry.UserId, orgID)
 }
