@@ -9,14 +9,47 @@ import (
 	"github.com/socr/o365-monitor/internal/ingest"
 	"github.com/socr/o365-monitor/internal/middleware"
 	"github.com/socr/o365-monitor/internal/models"
+	"github.com/socr/o365-monitor/internal/o365"
 )
 
 func RegisterTenantRoutes(r chi.Router) {
 	r.Post("/tenants", CreateTenant)
+	r.Post("/tenants/test", TestTenantConnection)
 	r.Get("/tenants", ListTenants)
 	r.Get("/tenants/{id}", GetTenantByID)
 	r.Put("/tenants/{id}", UpdateTenant)
 	r.Delete("/tenants/{id}", DeleteTenant)
+}
+
+// TestConnectionRequest represents credentials to test
+type TestConnectionRequest struct {
+	TenantID     string `json:"tenant_id"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+}
+
+// TestTenantConnection tests M365 credentials before saving
+func TestTenantConnection(w http.ResponseWriter, r *http.Request) {
+	var req TestConnectionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"success":false,"message":"Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.TenantID == "" || req.ClientID == "" || req.ClientSecret == "" {
+		http.Error(w, `{"success":false,"message":"Missing required fields","details":"Tenant ID, Client ID, and Client Secret are all required."}`, http.StatusBadRequest)
+		return
+	}
+
+	// Create client and test connection
+	client := o365.NewClient(req.TenantID, req.ClientID, req.ClientSecret)
+	result := client.TestConnection()
+
+	w.Header().Set("Content-Type", "application/json")
+	if !result.Success {
+		w.WriteHeader(http.StatusOK) // Return 200 with failure details in body
+	}
+	json.NewEncoder(w).Encode(result)
 }
 
 func GetTenantByID(w http.ResponseWriter, r *http.Request) {

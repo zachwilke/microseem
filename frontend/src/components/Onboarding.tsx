@@ -38,6 +38,17 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     ]);
     const [invitesSent, setInvitesSent] = useState(false);
 
+    // Connection test state
+    const [testResult, setTestResult] = useState<{
+        success: boolean;
+        message: string;
+        details?: string;
+        auth_ok?: boolean;
+        permissions_ok?: boolean;
+        subscriptions?: string[];
+    } | null>(null);
+    const [isTesting, setIsTesting] = useState(false);
+
     const alertTemplates = [
         {
             id: 'failed-login',
@@ -161,6 +172,34 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     const generateTempPassword = () => {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
         return Array.from({ length: 16 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    };
+
+    const handleTestConnection = async () => {
+        if (!tenantForm.tenant_id || !tenantForm.client_id || !tenantForm.client_secret) {
+            setError('Please fill in Tenant ID, Client ID, and Client Secret to test the connection');
+            return;
+        }
+
+        setIsTesting(true);
+        setError(null);
+        setTestResult(null);
+
+        try {
+            const response = await api.post('/tenants/test', {
+                tenant_id: tenantForm.tenant_id,
+                client_id: tenantForm.client_id,
+                client_secret: tenantForm.client_secret
+            });
+            setTestResult(response.data);
+        } catch (err: any) {
+            setTestResult({
+                success: false,
+                message: 'Connection test failed',
+                details: err.response?.data?.details || err.message || 'Unable to reach the server'
+            });
+        } finally {
+            setIsTesting(false);
+        }
     };
 
     const handleTenantSubmit = async () => {
@@ -534,6 +573,115 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                         className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                     />
                 </div>
+
+                {/* Test Connection Button */}
+                <div className="pt-2">
+                    <button
+                        type="button"
+                        onClick={handleTestConnection}
+                        disabled={isTesting || !tenantForm.tenant_id || !tenantForm.client_id || !tenantForm.client_secret}
+                        className="w-full py-3 px-4 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-xl font-medium transition-all duration-200 flex items-center justify-center gap-2 border border-slate-600 disabled:border-slate-700"
+                    >
+                        {isTesting ? (
+                            <>
+                                <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
+                                Testing Connection...
+                            </>
+                        ) : (
+                            <>
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                </svg>
+                                Test Connection
+                            </>
+                        )}
+                    </button>
+                </div>
+
+                {/* Test Result Display */}
+                {testResult && (
+                    <div className={`p-4 rounded-xl border ${
+                        testResult.success
+                            ? 'bg-emerald-500/10 border-emerald-500/30'
+                            : 'bg-red-500/10 border-red-500/30'
+                    }`}>
+                        <div className="flex items-start gap-3">
+                            {testResult.success ? (
+                                <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                                    <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </div>
+                            ) : (
+                                <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                                    <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </div>
+                            )}
+                            <div className="flex-1">
+                                <h4 className={`font-medium ${testResult.success ? 'text-emerald-300' : 'text-red-300'}`}>
+                                    {testResult.message}
+                                </h4>
+                                {testResult.details && (
+                                    <p className={`text-sm mt-1 ${testResult.success ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
+                                        {testResult.details}
+                                    </p>
+                                )}
+
+                                {/* Detailed status for failures */}
+                                {!testResult.success && (
+                                    <div className="mt-3 space-y-2">
+                                        <div className="flex items-center gap-2 text-sm">
+                                            {testResult.auth_ok ? (
+                                                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                                                </svg>
+                                            ) : (
+                                                <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                            )}
+                                            <span className={testResult.auth_ok ? 'text-emerald-400' : 'text-red-400'}>
+                                                Authentication {testResult.auth_ok ? 'OK' : 'Failed'}
+                                            </span>
+                                        </div>
+                                        {testResult.auth_ok && (
+                                            <div className="flex items-center gap-2 text-sm">
+                                                {testResult.permissions_ok ? (
+                                                    <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                ) : (
+                                                    <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                                                    </svg>
+                                                )}
+                                                <span className={testResult.permissions_ok ? 'text-emerald-400' : 'text-red-400'}>
+                                                    API Permissions {testResult.permissions_ok ? 'OK' : 'Missing or Not Consented'}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Show subscriptions if available */}
+                                {testResult.success && testResult.subscriptions && testResult.subscriptions.length > 0 && (
+                                    <div className="mt-3">
+                                        <p className="text-xs text-emerald-400/70 mb-1">Active subscriptions:</p>
+                                        <div className="flex flex-wrap gap-1">
+                                            {testResult.subscriptions.map((sub, i) => (
+                                                <span key={i} className="px-2 py-0.5 bg-emerald-500/20 rounded text-xs text-emerald-300">
+                                                    {sub}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
 
             </div>
 

@@ -158,3 +158,138 @@ func (c *Client) StartSubscription(token, contentType string) error {
 
 	return nil
 }
+
+// TestConnectionResult contains the result of a connection test
+type TestConnectionResult struct {
+	Success       bool     `json:"success"`
+	Message       string   `json:"message"`
+	Details       string   `json:"details,omitempty"`
+	AuthOK        bool     `json:"auth_ok"`
+	PermissionsOK bool     `json:"permissions_ok"`
+	Subscriptions []string `json:"subscriptions,omitempty"`
+}
+
+// ListSubscriptions gets the current subscriptions
+func (c *Client) ListSubscriptions(token string) ([]map[string]interface{}, error) {
+	reqURL := fmt.Sprintf("%s/api/v1.0/%s/activity/feed/subscriptions/list",
+		ResourceAPI, c.TenantID)
+
+	req, err := http.NewRequest("GET", reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.HttpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ListSubscriptions error: %s %s", resp.Status, string(body))
+	}
+
+	var subs []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&subs); err != nil {
+		return nil, err
+	}
+
+	return subs, nil
+}
+
+// TestConnection verifies credentials and permissions
+func (c *Client) TestConnection() TestConnectionResult {
+	result := TestConnectionResult{
+		Success:       false,
+		AuthOK:        false,
+		PermissionsOK: false,
+	}
+
+	// Step 1: Test authentication
+	token, err := c.GetAccessToken()
+	if err != nil {
+		errStr := err.Error()
+		result.Message = "Authentication failed"
+
+		// Parse common errors
+		if contains(errStr, "AADSTS700016") {
+			result.Details = "Application not found. Verify the Client ID is correct and the app exists in this tenant."
+		} else if contains(errStr, "AADSTS7000215") {
+			result.Details = "Invalid client secret. The secret may have expired or been entered incorrectly."
+		} else if contains(errStr, "AADSTS90002") {
+			result.Details = "Tenant not found. Verify the Tenant ID is correct."
+		} else if contains(errStr, "AADSTS700027") {
+			result.Details = "Client assertion failed. Check that the client secret is valid."
+		} else if contains(errStr, "AADSTS50126") {
+			result.Details = "Invalid credentials. Check your Client ID and Client Secret."
+		} else {
+			result.Details = errStr
+		}
+		return result
+	}
+
+	result.AuthOK = true
+
+	// Step 2: Test API permissions by listing subscriptions
+	subs, err := c.ListSubscriptions(token)
+	if err != nil {
+		errStr := err.Error()
+		result.Message = "API permission check failed"
+
+		if contains(errStr, "403") || contains(errStr, "Forbidden") {
+			result.Details = "Access denied. The app lacks required permissions. Ensure 'Office 365 Management APIs > ActivityFeed.Read' (Application) is granted and admin consent is approved."
+		} else if contains(errStr, "401") || contains(errStr, "Unauthorized") {
+			result.Details = "Unauthorized. The token may not have the required scopes. Check API permissions and admin consent."
+		} else if contains(errStr, "AF20024") {
+			result.Details = "Subscription not started. This is normal for first-time setup - subscriptions will be created automatically."
+			result.PermissionsOK = true
+			result.Success = true
+			result.Message = "Connection successful"
+		} else {
+			result.Details = errStr
+		}
+
+		// If we got an auth error but could authenticate, permissions are likely the issue
+		if result.AuthOK && !result.PermissionsOK {
+			return result
+		}
+	}
+
+	result.PermissionsOK = true
+	result.Success = true
+	result.Message = "Connection successful"
+
+	// Collect active subscriptions
+	var activeTypes []string
+	for _, sub := range subs {
+		if status, ok := sub["status"].(string); ok && status == "enabled" {
+			if ct, ok := sub["contentType"].(string); ok {
+				activeTypes = append(activeTypes, ct)
+			}
+		}
+	}
+	result.Subscriptions = activeTypes
+
+	if len(activeTypes) > 0 {
+		result.Details = fmt.Sprintf("Found %d active subscription(s)", len(activeTypes))
+	} else {
+		result.Details = "Authentication and permissions verified. Subscriptions will be created when polling starts."
+	}
+
+	return result
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsImpl(s, substr))
+}
+
+func containsImpl(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
