@@ -17,10 +17,23 @@ import (
 
 // RegisterAuthRoutes registers public auth routes (no auth required)
 func RegisterAuthRoutes(r chi.Router) {
+	r.Get("/auth/setup-status", GetSetupStatus)
 	r.Post("/auth/register", Register)
 	r.Post("/auth/login", Login)
 	r.Post("/auth/refresh", RefreshToken)
 	r.Post("/auth/logout", Logout)
+}
+
+// GetSetupStatus checks if this is a fresh installation
+func GetSetupStatus(w http.ResponseWriter, r *http.Request) {
+	var count int64
+	database.DB.Model(&models.User{}).Count(&count)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"needs_setup":  count == 0,
+		"is_first_run": count == 0,
+	})
 }
 
 // RegisterUserRoutes registers authenticated user management routes

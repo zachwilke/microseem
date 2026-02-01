@@ -16,6 +16,7 @@ import KibanaEmbed from './components/KibanaEmbed';
 import Onboarding from './components/Onboarding';
 import Login from './components/Login';
 import Register from './components/Register';
+import FirstTimeSetup from './components/FirstTimeSetup';
 
 function AppContent() {
     const { user, isLoading: authLoading } = useAuth();
@@ -173,10 +174,29 @@ function AppContent() {
 }
 
 function App() {
-    const { isAuthenticated, isLoading } = useAuth();
+    const { isAuthenticated, isLoading, checkSetupStatus } = useAuth();
+    const [needsFirstSetup, setNeedsFirstSetup] = useState<boolean | null>(null);
+    const [checkingSetup, setCheckingSetup] = useState(true);
+
+    useEffect(() => {
+        const checkFirstTimeSetup = async () => {
+            try {
+                const status = await checkSetupStatus();
+                setNeedsFirstSetup(status.needs_setup);
+            } catch {
+                setNeedsFirstSetup(false);
+            } finally {
+                setCheckingSetup(false);
+            }
+        };
+
+        if (!isLoading) {
+            checkFirstTimeSetup();
+        }
+    }, [isLoading, checkSetupStatus]);
 
     // Show loading state
-    if (isLoading) {
+    if (isLoading || checkingSetup) {
         return (
             <div className="min-h-screen bg-slate-900 flex items-center justify-center">
                 <div className="text-center">
@@ -193,6 +213,11 @@ function App() {
                 </div>
             </div>
         );
+    }
+
+    // Show first-time setup if no users exist
+    if (needsFirstSetup && !isAuthenticated) {
+        return <FirstTimeSetup onComplete={() => setNeedsFirstSetup(false)} />;
     }
 
     // Show auth pages for unauthenticated users

@@ -30,6 +30,7 @@ interface AuthContextType extends AuthState {
     register: (data: RegisterData) => Promise<void>;
     logout: () => Promise<void>;
     refreshUser: () => Promise<void>;
+    checkSetupStatus: () => Promise<{ needs_setup: boolean }>;
 }
 
 interface RegisterData {
@@ -166,8 +167,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setState({ user: response.data, isLoading: false, isAuthenticated: true });
     };
 
+    const checkSetupStatus = async (): Promise<{ needs_setup: boolean }> => {
+        try {
+            const response = await api.get('/auth/setup-status');
+            return response.data;
+        } catch {
+            return { needs_setup: false };
+        }
+    };
+
     return (
-        <AuthContext.Provider value={{ ...state, login, register, logout, refreshUser }}>
+        <AuthContext.Provider value={{ ...state, login, register, logout, refreshUser, checkSetupStatus }}>
             {children}
         </AuthContext.Provider>
     );

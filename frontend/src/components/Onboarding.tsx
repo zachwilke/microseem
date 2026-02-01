@@ -8,6 +8,7 @@ interface OnboardingProps {
 
 const STEPS = [
     { id: 'welcome', title: 'Welcome' },
+    { id: 'account', title: 'Team Setup' },
     { id: 'tenant', title: 'Connect M365' },
     { id: 'alerts', title: 'Set Up Alerts' },
     { id: 'complete', title: 'Ready!' }
@@ -30,6 +31,12 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
 
     // Alert form state
     const [selectedAlertTemplates, setSelectedAlertTemplates] = useState<string[]>([]);
+
+    // Team invite form state
+    const [teamInvites, setTeamInvites] = useState<Array<{ email: string; role: string }>>([
+        { email: '', role: 'technician' }
+    ]);
+    const [invitesSent, setInvitesSent] = useState(false);
 
     const alertTemplates = [
         {
@@ -100,6 +107,62 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
         }
     }, [user]);
 
+    const addTeamInvite = () => {
+        if (teamInvites.length < 5) {
+            setTeamInvites([...teamInvites, { email: '', role: 'technician' }]);
+        }
+    };
+
+    const removeTeamInvite = (index: number) => {
+        setTeamInvites(teamInvites.filter((_, i) => i !== index));
+    };
+
+    const updateTeamInvite = (index: number, field: 'email' | 'role', value: string) => {
+        const updated = [...teamInvites];
+        updated[index][field] = value;
+        setTeamInvites(updated);
+    };
+
+    const handleTeamInvitesSubmit = async () => {
+        const validInvites = teamInvites.filter(inv => inv.email.trim() !== '');
+
+        if (validInvites.length === 0) {
+            setCurrentStep(2);
+            return;
+        }
+
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            for (const invite of validInvites) {
+                await api.post('/users', {
+                    email: invite.email,
+                    password: generateTempPassword(),
+                    first_name: invite.email.split('@')[0],
+                    last_name: '',
+                    role: invite.role
+                });
+            }
+            setInvitesSent(true);
+            setCurrentStep(2);
+        } catch (err: any) {
+            setError(err.response?.data?.error || 'Failed to create some team members.');
+            // Continue anyway after showing error
+            setTimeout(() => {
+                setError(null);
+                setCurrentStep(2);
+            }, 2000);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const generateTempPassword = () => {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
+        return Array.from({ length: 16 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    };
+
     const handleTenantSubmit = async () => {
         if (!tenantForm.name || !tenantForm.tenant_id || !tenantForm.client_id || !tenantForm.client_secret) {
             setError('Please fill in all required fields');
@@ -111,7 +174,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
 
         try {
             await api.post('/tenants', tenantForm);
-            setCurrentStep(2);
+            setCurrentStep(3);
         } catch (err: any) {
             setError(err.response?.data || 'Failed to connect tenant. Please check your credentials.');
         } finally {
@@ -138,11 +201,11 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                     });
                 }
             }
-            setCurrentStep(3);
+            setCurrentStep(4);
         } catch (err: any) {
             console.error('Failed to create some rules:', err);
             // Continue anyway
-            setCurrentStep(3);
+            setCurrentStep(4);
         } finally {
             setIsLoading(false);
         }
@@ -250,6 +313,153 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
         </div>
     );
 
+    const renderAccountSetup = () => (
+        <div className="max-w-xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="text-center mb-8">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                    <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">Set Up Your Team</h2>
+                <p className="text-slate-400">Invite team members to collaborate on security monitoring.</p>
+            </div>
+
+            {/* Account Info Card */}
+            <div className="mb-6 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
+                <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-lg font-bold">
+                        {user?.first_name?.charAt(0).toUpperCase()}{user?.last_name?.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1">
+                        <div className="font-medium text-white">{user?.first_name} {user?.last_name}</div>
+                        <div className="text-sm text-slate-400">{user?.email}</div>
+                    </div>
+                    <div className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
+                        Admin
+                    </div>
+                </div>
+            </div>
+
+            {error && (
+                <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+                    {error}
+                </div>
+            )}
+
+            {/* Team Invites */}
+            <div className="bg-slate-800/30 rounded-2xl border border-slate-700/50 p-6 mb-6">
+                <h3 className="text-lg font-medium text-white mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                    </svg>
+                    Invite Team Members
+                    <span className="text-slate-500 text-sm font-normal">(optional)</span>
+                </h3>
+
+                <div className="space-y-3">
+                    {teamInvites.map((invite, index) => (
+                        <div key={index} className="flex gap-3">
+                            <input
+                                type="email"
+                                value={invite.email}
+                                onChange={(e) => updateTeamInvite(index, 'email', e.target.value)}
+                                placeholder="colleague@company.com"
+                                className="flex-1 px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm"
+                            />
+                            <select
+                                value={invite.role}
+                                onChange={(e) => updateTeamInvite(index, 'role', e.target.value)}
+                                className="px-3 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white focus:outline-none focus:border-blue-500 transition-all text-sm"
+                            >
+                                <option value="admin">Admin</option>
+                                <option value="technician">Technician</option>
+                                <option value="report_admin">Report Admin</option>
+                            </select>
+                            {teamInvites.length > 1 && (
+                                <button
+                                    onClick={() => removeTeamInvite(index)}
+                                    className="p-3 text-slate-500 hover:text-red-400 transition-colors"
+                                >
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                            )}
+                        </div>
+                    ))}
+                </div>
+
+                {teamInvites.length < 5 && (
+                    <button
+                        onClick={addTeamInvite}
+                        className="mt-4 flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                        </svg>
+                        Add another team member
+                    </button>
+                )}
+
+                {/* Role descriptions */}
+                <div className="mt-6 p-4 bg-slate-900/50 rounded-xl">
+                    <h4 className="text-sm font-medium text-slate-300 mb-3">Role Permissions</h4>
+                    <div className="space-y-2 text-xs text-slate-400">
+                        <div className="flex items-start gap-2">
+                            <span className="text-purple-400 font-medium min-w-[90px]">Admin</span>
+                            <span>Full access - manage users, settings, integrations, and all features</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                            <span className="text-blue-400 font-medium min-w-[90px]">Technician</span>
+                            <span>Operational access - view logs, manage alerts, investigations</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                            <span className="text-emerald-400 font-medium min-w-[90px]">Report Admin</span>
+                            <span>Read-only access - view logs, analytics, and dashboards</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex justify-between">
+                <button
+                    onClick={() => setCurrentStep(0)}
+                    className="px-6 py-3 text-slate-400 hover:text-white transition-colors"
+                >
+                    Back
+                </button>
+                <div className="flex gap-3">
+                    <button
+                        onClick={() => setCurrentStep(2)}
+                        className="px-6 py-3 text-slate-400 hover:text-white transition-colors"
+                    >
+                        Skip for now
+                    </button>
+                    <button
+                        onClick={handleTeamInvitesSubmit}
+                        disabled={isLoading}
+                        className="px-8 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white rounded-xl font-medium transition-all disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                        {isLoading ? (
+                            <>
+                                <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
+                                Creating...
+                            </>
+                        ) : (
+                            <>
+                                {teamInvites.some(inv => inv.email.trim()) ? 'Create & Continue' : 'Continue'}
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                </svg>
+                            </>
+                        )}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
     const renderTenantSetup = () => (
         <div className="max-w-xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="text-center mb-8">
@@ -345,10 +555,10 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
 
             <div className="flex justify-between mt-8">
                 <button
-                    onClick={() => setCurrentStep(0)}
+                    onClick={() => setCurrentStep(1)}
                     className="px-6 py-3 text-slate-400 hover:text-white transition-colors"
                 >
-                    ← Back
+                    Back
                 </button>
                 <button
                     onClick={handleTenantSubmit}
@@ -443,14 +653,14 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
 
             <div className="flex justify-between">
                 <button
-                    onClick={() => setCurrentStep(1)}
+                    onClick={() => setCurrentStep(2)}
                     className="px-6 py-3 text-slate-400 hover:text-white transition-colors"
                 >
-                    ← Back
+                    Back
                 </button>
                 <div className="flex gap-3">
                     <button
-                        onClick={() => setCurrentStep(3)}
+                        onClick={() => setCurrentStep(4)}
                         className="px-6 py-3 text-slate-400 hover:text-white transition-colors"
                     >
                         Skip for now
@@ -510,6 +720,30 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                         </svg>
                     </div>
                     <div>
+                        <div className="font-medium text-white">Account Created</div>
+                        <div className="text-sm text-slate-500">You're signed in as {user?.email}</div>
+                    </div>
+                </div>
+                {invitesSent && teamInvites.filter(inv => inv.email.trim()).length > 0 && (
+                    <div className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                            <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                        </div>
+                        <div>
+                            <div className="font-medium text-white">{teamInvites.filter(inv => inv.email.trim()).length} Team Members Added</div>
+                            <div className="text-sm text-slate-500">They'll need to reset their password to sign in</div>
+                        </div>
+                    </div>
+                )}
+                <div className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                    </div>
+                    <div>
                         <div className="font-medium text-white">Tenant Connected</div>
                         <div className="text-sm text-slate-500">Audit logs will start flowing shortly</div>
                     </div>
@@ -560,9 +794,10 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                     {renderStepIndicator()}
 
                     {currentStep === 0 && renderWelcome()}
-                    {currentStep === 1 && renderTenantSetup()}
-                    {currentStep === 2 && renderAlertSetup()}
-                    {currentStep === 3 && renderComplete()}
+                    {currentStep === 1 && renderAccountSetup()}
+                    {currentStep === 2 && renderTenantSetup()}
+                    {currentStep === 3 && renderAlertSetup()}
+                    {currentStep === 4 && renderComplete()}
                 </div>
             </div>
 
