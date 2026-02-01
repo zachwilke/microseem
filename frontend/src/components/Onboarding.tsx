@@ -535,21 +535,179 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                     />
                 </div>
 
-                {/* Help section */}
-                <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
-                    <h4 className="text-sm font-medium text-blue-400 mb-2 flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Where do I find these?
+            </div>
+
+            {/* Detailed Setup Guide */}
+            <div className="mt-6 space-y-4">
+                <div className="p-5 bg-slate-800/50 rounded-2xl border border-slate-700/50">
+                    <h4 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold">1</span>
+                        Create App Registration
                     </h4>
-                    <ol className="text-sm text-slate-400 space-y-1 list-decimal list-inside">
-                        <li>Go to <strong className="text-slate-300">Azure Portal</strong> → Azure Active Directory</li>
-                        <li>Navigate to <strong className="text-slate-300">App registrations</strong></li>
-                        <li>Create a new app or select existing one</li>
-                        <li>Copy the <strong className="text-slate-300">Application (client) ID</strong> and <strong className="text-slate-300">Directory (tenant) ID</strong></li>
-                        <li>Under Certificates & secrets, create a new client secret</li>
+                    <ol className="text-sm text-slate-400 space-y-2 ml-8">
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">a.</span>
+                            <span>Go to <a href="https://portal.azure.com/#view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/RegisteredApps" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">Azure Portal → App registrations</a></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">b.</span>
+                            <span>Click <strong className="text-slate-300">+ New registration</strong></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">c.</span>
+                            <span>Name: <code className="px-1.5 py-0.5 bg-slate-900 rounded text-blue-300 text-xs">MicroSeem SIEM</code> (or any name)</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">d.</span>
+                            <span>Supported account types: <strong className="text-slate-300">Single tenant</strong></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">e.</span>
+                            <span>Click <strong className="text-slate-300">Register</strong></span>
+                        </li>
                     </ol>
+                    <div className="mt-3 ml-8 p-3 bg-slate-900/50 rounded-lg">
+                        <p className="text-xs text-slate-500">After registration, copy these values from the Overview page:</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            <code className="px-2 py-1 bg-slate-800 rounded text-xs text-emerald-400">Application (client) ID</code>
+                            <code className="px-2 py-1 bg-slate-800 rounded text-xs text-emerald-400">Directory (tenant) ID</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-5 bg-slate-800/50 rounded-2xl border border-slate-700/50">
+                    <h4 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold">2</span>
+                        Configure API Permissions
+                    </h4>
+                    <ol className="text-sm text-slate-400 space-y-2 ml-8">
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">a.</span>
+                            <span>In your app, go to <strong className="text-slate-300">API permissions</strong> → <strong className="text-slate-300">+ Add a permission</strong></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">b.</span>
+                            <span>Select <strong className="text-slate-300">APIs my organization uses</strong> tab</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">c.</span>
+                            <span>Search for <code className="px-1.5 py-0.5 bg-slate-900 rounded text-blue-300 text-xs">Office 365 Management APIs</code></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">d.</span>
+                            <span>Select <strong className="text-slate-300">Application permissions</strong> (not Delegated)</span>
+                        </li>
+                    </ol>
+
+                    {/* Required Permissions Table */}
+                    <div className="mt-4 ml-8">
+                        <p className="text-xs font-medium text-slate-300 mb-2">Required Permissions:</p>
+                        <div className="bg-slate-900/70 rounded-lg overflow-hidden border border-slate-700/50">
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="border-b border-slate-700/50">
+                                        <th className="px-3 py-2 text-left text-slate-400 font-medium">Permission</th>
+                                        <th className="px-3 py-2 text-left text-slate-400 font-medium">Type</th>
+                                        <th className="px-3 py-2 text-left text-slate-400 font-medium">Purpose</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-700/50">
+                                    <tr>
+                                        <td className="px-3 py-2 font-mono text-emerald-400">ActivityFeed.Read</td>
+                                        <td className="px-3 py-2 text-slate-400">Application</td>
+                                        <td className="px-3 py-2 text-slate-400">Read audit logs</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="px-3 py-2 font-mono text-emerald-400">ActivityFeed.ReadDlp</td>
+                                        <td className="px-3 py-2 text-slate-400">Application</td>
+                                        <td className="px-3 py-2 text-slate-400">Read DLP events</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="px-3 py-2 font-mono text-emerald-400">ServiceHealth.Read</td>
+                                        <td className="px-3 py-2 text-slate-400">Application</td>
+                                        <td className="px-3 py-2 text-slate-400">Service health info</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div className="mt-4 ml-8 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                        <div className="flex items-start gap-2">
+                            <svg className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <div>
+                                <p className="text-xs text-amber-300 font-medium">Admin Consent Required</p>
+                                <p className="text-xs text-amber-400/80 mt-1">After adding permissions, click <strong>"Grant admin consent for [Your Org]"</strong> button. A Global Admin must approve this.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-5 bg-slate-800/50 rounded-2xl border border-slate-700/50">
+                    <h4 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold">3</span>
+                        Create Client Secret
+                    </h4>
+                    <ol className="text-sm text-slate-400 space-y-2 ml-8">
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">a.</span>
+                            <span>Go to <strong className="text-slate-300">Certificates & secrets</strong> → <strong className="text-slate-300">Client secrets</strong></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">b.</span>
+                            <span>Click <strong className="text-slate-300">+ New client secret</strong></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">c.</span>
+                            <span>Description: <code className="px-1.5 py-0.5 bg-slate-900 rounded text-blue-300 text-xs">MicroSeem Production</code></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">d.</span>
+                            <span>Expiration: <strong className="text-slate-300">24 months</strong> (recommended)</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-slate-500 select-none">e.</span>
+                            <span>Click <strong className="text-slate-300">Add</strong> and <strong className="text-red-400">immediately copy the Value</strong></span>
+                        </li>
+                    </ol>
+                    <div className="mt-3 ml-8 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                        <div className="flex items-start gap-2">
+                            <svg className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <p className="text-xs text-red-300">The secret value is only shown once! Copy it immediately after creation. You cannot retrieve it later.</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Quick Reference */}
+                <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
+                    <h4 className="text-sm font-medium text-emerald-400 mb-3 flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Quick Checklist
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" className="rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500/30" />
+                            <span>App registered in Azure AD</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" className="rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500/30" />
+                            <span>ActivityFeed.Read permission added</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" className="rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500/30" />
+                            <span>Admin consent granted</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" className="rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500/30" />
+                            <span>Client secret created & copied</span>
+                        </label>
+                    </div>
                 </div>
             </div>
 
