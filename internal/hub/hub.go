@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
@@ -70,18 +71,23 @@ type JWK struct {
 
 var GlobalHub = &Hub{
 	rooms:      make(map[uuid.UUID]map[*Client]bool),
-	broadcast:  make(chan broadcastMessage, 100),
-	register:   make(chan *Client),
-	unregister: make(chan *Client),
+	broadcast:  make(chan broadcastMessage, 256),
+	register:   make(chan *Client, 32),
+	unregister: make(chan *Client, 32),
 	logBuffers: make(map[uuid.UUID][]models.AuditLog),
 }
 
-func (h *Hub) Run() {
+func (h *Hub) Run(ctx context.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond) // Flush every 500ms
 	defer ticker.Stop()
 
 	for {
 		select {
+		case <-ctx.Done():
+			log.Println("WebSocket hub shutting down...")
+			h.closeAllClients()
+			return
+
 		case client := <-h.register:
 			h.mu.Lock()
 			if h.rooms[client.OrgID] == nil {
@@ -124,6 +130,20 @@ func (h *Hub) Run() {
 			h.flushAllBuffers()
 		}
 	}
+}
+
+// closeAllClients closes all connected WebSocket clients
+func (h *Hub) closeAllClients() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for orgID, room := range h.rooms {
+		for client := range room {
+			client.Conn.Close()
+		}
+		delete(h.rooms, orgID)
+	}
+	log.Println("All WebSocket clients closed")
 }
 
 func (h *Hub) flushAllBuffers() {

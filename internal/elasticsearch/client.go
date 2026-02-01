@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -14,6 +15,13 @@ import (
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/google/uuid"
 	"github.com/socr/o365-monitor/internal/models"
+)
+
+const (
+	requestTimeout   = 30 * time.Second
+	maxIdleConns     = 10
+	idleConnTimeout  = 30 * time.Second
+	maxResultSize    = 10000 // Hard limit on search results
 )
 
 var (
@@ -50,15 +58,23 @@ const indexTemplateBody = `{
 	}
 }`
 
-// InitClient initializes the Elasticsearch client
+// InitClient initializes the Elasticsearch client with proper timeouts
 func InitClient() error {
 	esURL := os.Getenv("ELASTICSEARCH_URL")
 	if esURL == "" {
 		esURL = "http://localhost:9200"
 	}
 
+	// Configure HTTP transport with timeouts
+	transport := &http.Transport{
+		MaxIdleConns:        maxIdleConns,
+		MaxIdleConnsPerHost: maxIdleConns,
+		IdleConnTimeout:     idleConnTimeout,
+	}
+
 	cfg := elasticsearch.Config{
 		Addresses: []string{esURL},
+		Transport: transport,
 	}
 
 	var err error
@@ -67,8 +83,11 @@ func InitClient() error {
 		return fmt.Errorf("failed to create ES client: %w", err)
 	}
 
-	// Test connection
-	res, err := Client.Info()
+	// Test connection with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	res, err := Client.Info(Client.Info.WithContext(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to connect to ES: %w", err)
 	}
@@ -81,7 +100,7 @@ func InitClient() error {
 	log.Printf("Connected to Elasticsearch: %s", esURL)
 
 	// Create index template
-	if err := createIndexTemplate(); err != nil {
+	if err := createIndexTemplate(ctx); err != nil {
 		log.Printf("Warning: Failed to create index template: %v", err)
 	}
 
@@ -89,13 +108,13 @@ func InitClient() error {
 }
 
 // createIndexTemplate creates the index template for logs
-func createIndexTemplate() error {
+func createIndexTemplate(ctx context.Context) error {
 	req := esapi.IndicesPutIndexTemplateRequest{
 		Name: "logs-template",
 		Body: strings.NewReader(indexTemplateBody),
 	}
 
-	res, err := req.Do(context.Background(), Client)
+	res, err := req.Do(ctx, Client)
 	if err != nil {
 		return err
 	}
@@ -144,33 +163,33 @@ type GeoPoint struct {
 }
 
 // AuditLogToDocument converts an AuditLog to a LogDocument
-func AuditLogToDocument(log models.AuditLog) LogDocument {
+func AuditLogToDocument(auditLog models.AuditLog) LogDocument {
 	doc := LogDocument{
-		ID:             log.ID.String(),
-		OrganizationID: log.OrganizationID.String(),
-		TenantID:       log.TenantID.String(),
-		RecordType:     log.RecordType,
-		CreationTime:   log.CreationTime,
-		Operation:      log.Operation,
-		Workload:       log.Workload,
-		UserID:         log.UserId,
-		ClientIP:       log.ClientIP,
-		City:           log.City,
-		CountryCode:    log.CountryCode,
-		IngestedAt:     log.IngestedAt,
+		ID:             auditLog.ID.String(),
+		OrganizationID: auditLog.OrganizationID.String(),
+		TenantID:       auditLog.TenantID.String(),
+		RecordType:     auditLog.RecordType,
+		CreationTime:   auditLog.CreationTime,
+		Operation:      auditLog.Operation,
+		Workload:       auditLog.Workload,
+		UserID:         auditLog.UserId,
+		ClientIP:       auditLog.ClientIP,
+		City:           auditLog.City,
+		CountryCode:    auditLog.CountryCode,
+		IngestedAt:     auditLog.IngestedAt,
 	}
 
 	// Add geo_point if coordinates exist
-	if log.Latitude != 0 || log.Longitude != 0 {
+	if auditLog.Latitude != 0 || auditLog.Longitude != 0 {
 		doc.Location = &GeoPoint{
-			Lat: log.Latitude,
-			Lon: log.Longitude,
+			Lat: auditLog.Latitude,
+			Lon: auditLog.Longitude,
 		}
 	}
 
-	// Parse RawData from JSON bytes
-	if len(log.RawData) > 0 {
-		json.Unmarshal(log.RawData, &doc.RawData)
+	// Parse RawData from JSON bytes - ignore errors for invalid JSON
+	if len(auditLog.RawData) > 0 {
+		_ = json.Unmarshal(auditLog.RawData, &doc.RawData)
 	}
 
 	return doc
@@ -182,11 +201,15 @@ func BulkIndexLogs(ctx context.Context, orgID uuid.UUID, logs []models.AuditLog)
 		return nil
 	}
 
+	if Client == nil {
+		return fmt.Errorf("elasticsearch client not initialized")
+	}
+
 	var buf bytes.Buffer
 
-	for _, log := range logs {
-		indexName := GetIndexName(orgID, log.CreationTime)
-		doc := AuditLogToDocument(log)
+	for _, logEntry := range logs {
+		indexName := GetIndexName(orgID, logEntry.CreationTime)
+		doc := AuditLogToDocument(logEntry)
 
 		// Bulk action metadata
 		meta := map[string]interface{}{
@@ -195,12 +218,18 @@ func BulkIndexLogs(ctx context.Context, orgID uuid.UUID, logs []models.AuditLog)
 				"_id":    doc.ID,
 			},
 		}
-		metaBytes, _ := json.Marshal(meta)
+		metaBytes, err := json.Marshal(meta)
+		if err != nil {
+			return fmt.Errorf("failed to marshal bulk metadata: %w", err)
+		}
 		buf.Write(metaBytes)
 		buf.WriteByte('\n')
 
 		// Document
-		docBytes, _ := json.Marshal(doc)
+		docBytes, err := json.Marshal(doc)
+		if err != nil {
+			return fmt.Errorf("failed to marshal document: %w", err)
+		}
 		buf.Write(docBytes)
 		buf.WriteByte('\n')
 	}
@@ -215,5 +244,47 @@ func BulkIndexLogs(ctx context.Context, orgID uuid.UUID, logs []models.AuditLog)
 		return fmt.Errorf("bulk index error response: %s", res.String())
 	}
 
+	// Check for item-level errors
+	var bulkResponse struct {
+		Errors bool `json:"errors"`
+		Items  []struct {
+			Index struct {
+				Error *struct {
+					Type   string `json:"type"`
+					Reason string `json:"reason"`
+				} `json:"error,omitempty"`
+			} `json:"index"`
+		} `json:"items"`
+	}
+
+	if err := json.NewDecoder(res.Body).Decode(&bulkResponse); err != nil {
+		return fmt.Errorf("failed to decode bulk response: %w", err)
+	}
+
+	if bulkResponse.Errors {
+		// Count errors and log first few
+		errorCount := 0
+		for _, item := range bulkResponse.Items {
+			if item.Index.Error != nil {
+				errorCount++
+				if errorCount <= 3 {
+					log.Printf("Bulk index item error: %s - %s", item.Index.Error.Type, item.Index.Error.Reason)
+				}
+			}
+		}
+		return fmt.Errorf("bulk index had %d errors out of %d items", errorCount, len(logs))
+	}
+
 	return nil
+}
+
+// ValidateSize ensures the requested size is within bounds
+func ValidateSize(size int) int {
+	if size <= 0 {
+		return 100 // default
+	}
+	if size > maxResultSize {
+		return maxResultSize
+	}
+	return size
 }

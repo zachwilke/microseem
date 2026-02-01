@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -14,7 +15,8 @@ import (
 )
 
 const (
-	TopicLogsRaw = "logs-raw"
+	TopicLogsRaw  = "logs-raw"
+	writeTimeout  = 10 * time.Second
 )
 
 var (
@@ -57,6 +59,10 @@ func ProduceLogs(ctx context.Context, orgID uuid.UUID, tenantID uuid.UUID, logs 
 		return nil // Kafka not configured, skip
 	}
 
+	if len(logs) == 0 {
+		return nil
+	}
+
 	batch := LogBatch{
 		OrganizationID: orgID,
 		TenantID:       tenantID,
@@ -65,7 +71,7 @@ func ProduceLogs(ctx context.Context, orgID uuid.UUID, tenantID uuid.UUID, logs 
 
 	value, err := json.Marshal(batch)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal log batch: %w", err)
 	}
 
 	msg := kafka.Message{
@@ -74,7 +80,15 @@ func ProduceLogs(ctx context.Context, orgID uuid.UUID, tenantID uuid.UUID, logs 
 		Time:  time.Now(),
 	}
 
-	return producer.WriteMessages(ctx, msg)
+	// Use timeout context for write
+	writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+
+	if err := producer.WriteMessages(writeCtx, msg); err != nil {
+		return fmt.Errorf("kafka write failed: %w", err)
+	}
+
+	return nil
 }
 
 // Close closes the Kafka producer

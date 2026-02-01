@@ -44,9 +44,8 @@ func TriggerPoll() {
 	}
 }
 
-func StartPoller() {
+func StartPoller(ctx context.Context) {
 	// Initialize GeoIP
-	// Check for a few common locations or env var
 	dbPath := os.Getenv("GEOIP_DB_PATH")
 	if dbPath == "" {
 		dbPath = "GeoLite2-City.mmdb"
@@ -56,63 +55,70 @@ func StartPoller() {
 	jobQueue := make(chan Job, 100)
 	var wg sync.WaitGroup
 
-	// Initialize GeoIP
-	geoip.Init("GeoLite2-City.mmdb")
-
 	// Initialize Alert Rules
 	alerting.Engine.LoadRules()
 
 	// Start Workers
 	for i := 0; i < WorkerCount; i++ {
 		wg.Add(1)
-		go worker(i, jobQueue, &wg)
+		go worker(ctx, i, jobQueue, &wg)
 	}
 
 	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
 
 	// Health Reporter
 	go func() {
 		rateTicker := time.NewTicker(2 * time.Second)
 		defer rateTicker.Stop()
-		for range rateTicker.C {
-			count := atomic.SwapUint64(&ingestCounter, 0)
-			errCount := atomic.SwapUint64(&errorCounter, 0)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-rateTicker.C:
+				count := atomic.SwapUint64(&ingestCounter, 0)
+				errCount := atomic.SwapUint64(&errorCounter, 0)
 
-			// Calculate rate (logs per minute)
-			rate := float64(count) * 30.0
-			errorRate := float64(errCount) * 30.0
+				// Calculate rate (logs per minute)
+				rate := float64(count) * 30.0
+				errorRate := float64(errCount) * 30.0
 
-			// Calculate Lag
-			var maxLagSeconds float64
-			var oldestTenant models.Tenant
-			// Find tenant with oldest LastPoll from DB
-			// We only care about tenants that have polling enabled (implied by existence in loop, but let's query)
-			if err := database.DB.Order("last_poll asc").Where("last_poll > '2000-01-01'").First(&oldestTenant).Error; err == nil {
-				lag := time.Since(oldestTenant.LastPoll)
-				maxLagSeconds = lag.Seconds()
+				// Calculate Lag
+				var maxLagSeconds float64
+				var oldestTenant models.Tenant
+				if err := database.DB.Order("last_poll asc").Where("last_poll > '2000-01-01'").First(&oldestTenant).Error; err == nil {
+					lag := time.Since(oldestTenant.LastPoll)
+					maxLagSeconds = lag.Seconds()
+				}
+
+				hub.GlobalHub.BroadcastHealth(map[string]interface{}{
+					"ingest_rate": rate,
+					"error_rate":  errorRate,
+					"lag_seconds": maxLagSeconds,
+				})
 			}
-
-			hub.GlobalHub.BroadcastHealth(map[string]interface{}{
-				"ingest_rate": rate,
-				"error_rate":  errorRate,
-				"lag_seconds": maxLagSeconds,
-			})
 		}
 	}()
 
 	// Initial Poll
-	go func() {
-		QueueJobs(jobQueue)
-		for {
-			select {
-			case <-ticker.C:
-				QueueJobs(jobQueue)
-			case <-manualTrigger:
-				log.Println("Triggered Poll started")
-				QueueJobs(jobQueue)
-			}
+	QueueJobs(jobQueue)
+
+	// Main polling loop
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Poller shutting down...")
+			close(jobQueue)
+			wg.Wait()
+			log.Println("Poller shutdown complete")
+			return
+		case <-ticker.C:
+			QueueJobs(jobQueue)
+		case <-manualTrigger:
+			log.Println("Triggered Poll started")
+			QueueJobs(jobQueue)
 		}
-	}()
+	}
 }
 
 func PollAllTenants() {
@@ -169,16 +175,33 @@ func QueueJobs(jobQueue chan Job) {
 	}
 }
 
-func worker(id int, jobs <-chan Job, wg *sync.WaitGroup) {
-	// defer wg.Done() // Long running worker
+func worker(ctx context.Context, id int, jobs <-chan Job, wg *sync.WaitGroup) {
+	defer wg.Done()
 	log.Printf("Worker %d started", id)
 
-	for job := range jobs {
-		processJob(id, job)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("Worker %d shutting down", id)
+			return
+		case job, ok := <-jobs:
+			if !ok {
+				log.Printf("Worker %d: job queue closed", id)
+				return
+			}
+			processJob(ctx, id, job)
+		}
 	}
 }
 
-func processJob(workerId int, job Job) {
+func processJob(ctx context.Context, workerId int, job Job) {
+	// Check for cancellation before starting
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	client := o365.NewClient(job.Tenant.TenantID, job.Tenant.ClientID, job.Tenant.ClientSecret)
 
 	token, err := client.GetAccessToken()
@@ -190,8 +213,6 @@ func processJob(workerId int, job Job) {
 
 	blobs, err := client.ListAvailableContent(token, job.ContentType, job.StartTime, job.EndTime)
 	if err != nil {
-		// Check if subscription disabled
-		// simple string check, ideally stricter parsing
 		if hasSubscriptionDisabledError(err) {
 			log.Printf("[Worker %d] Subscription disabled for %s on %s. Attempting to start...", workerId, job.ContentType, job.Tenant.Name)
 			if startErr := client.StartSubscription(token, job.ContentType); startErr != nil {
@@ -216,6 +237,13 @@ func processJob(workerId int, job Job) {
 	}
 
 	for _, blob := range blobs {
+		// Check for cancellation between blobs
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		events, err := client.FetchContent(token, blob.ContentUri)
 		if err != nil {
 			log.Printf("[Worker %d] Error fetching blob: %v", workerId, err)
@@ -230,22 +258,22 @@ func processJob(workerId int, job Job) {
 		}
 
 		if len(batch) > 0 {
-			saveBatch(batch, job.Tenant.OrganizationID, job.Tenant.ID)
+			saveBatch(ctx, batch, job.Tenant.OrganizationID, job.Tenant.ID)
 		}
 	}
 }
 
-func saveBatch(logs []models.AuditLog, orgID uuid.UUID, tenantID uuid.UUID) {
+func saveBatch(ctx context.Context, logs []models.AuditLog, orgID uuid.UUID, tenantID uuid.UUID) {
 	if len(logs) == 0 {
 		return
 	}
 
 	// Produce to Kafka (replaces direct DB write)
 	// Kafka consumer will write to Elasticsearch
-	ctx := context.Background()
 	if err := kafka.ProduceLogs(ctx, orgID, tenantID, logs); err != nil {
 		log.Printf("Failed to produce %d logs to Kafka: %v", len(logs), err)
 		atomic.AddUint64(&errorCounter, uint64(len(logs)))
+		return
 	}
 
 	// Broadcast via WebSocket (Hub handles buffering/batching internally too)
@@ -254,6 +282,12 @@ func saveBatch(logs []models.AuditLog, orgID uuid.UUID, tenantID uuid.UUID) {
 
 	// Check for Alerts (Sequential for now, could be parallelized)
 	for _, l := range logs {
+		// Check for cancellation between alerts
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		alerting.Engine.Evaluate(l, orgID)
 	}
 

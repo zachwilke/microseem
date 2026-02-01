@@ -38,9 +38,12 @@ type SearchResult struct {
 
 // SearchLogs searches for logs in Elasticsearch
 func SearchLogs(ctx context.Context, params SearchParams) (*SearchResult, error) {
-	if params.Size == 0 {
-		params.Size = 100
+	if Client == nil {
+		return nil, fmt.Errorf("elasticsearch client not initialized")
 	}
+
+	// Validate and bound the size parameter
+	params.Size = ValidateSize(params.Size)
 
 	indexPattern := GetIndexPattern(params.OrgID)
 
@@ -231,6 +234,10 @@ type VolumeDataPoint struct {
 
 // GetStats retrieves statistics for an organization
 func GetStats(ctx context.Context, orgID uuid.UUID, tenantID *uuid.UUID) (*StatsResult, error) {
+	if Client == nil {
+		return nil, fmt.Errorf("elasticsearch client not initialized")
+	}
+
 	indexPattern := GetIndexPattern(orgID)
 
 	// Build aggregation query
