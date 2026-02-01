@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+main
+server
+*.exe
+
+# Frontend (separate build)
+frontend/node_modules
+frontend/dist
+frontend/.env
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+*_test.go
+**/*_test.go
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Plan files
+.claude/

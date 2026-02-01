@@ -1,0 +1,78 @@
+# DigitalOcean App Platform Specification
+# https://docs.digitalocean.com/products/app-platform/reference/app-spec/
+
+name: microseem
+
+region: nyc
+
+# Backend API service
+services:
+  - name: api
+    github:
+      repo: zachwilke/microseem
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xs
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 10
+      period_seconds: 30
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+      - key: CLERK_SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: CLERK_FRONTEND_API
+        scope: RUN_TIME
+      - key: KAFKA_BROKERS
+        scope: RUN_TIME
+      - key: ELASTICSEARCH_URL
+        scope: RUN_TIME
+      - key: GEOIP_DB_PATH
+        scope: RUN_TIME
+        value: /app/GeoLite2-City.mmdb
+      - key: ALLOWED_ORIGINS
+        scope: RUN_TIME
+
+# Frontend static site
+static_sites:
+  - name: frontend
+    github:
+      repo: zachwilke/microseem
+      branch: main
+      deploy_on_push: true
+    source_dir: frontend
+    dockerfile_path: frontend/Dockerfile
+    build_command: npm run build
+    output_dir: dist
+    index_document: index.html
+    error_document: index.html
+    envs:
+      - key: VITE_CLERK_PUBLISHABLE_KEY
+        scope: BUILD_TIME
+      - key: VITE_KIBANA_URL
+        scope: BUILD_TIME
+      - key: VITE_API_URL
+        scope: BUILD_TIME
+
+# Managed PostgreSQL database
+databases:
+  - name: db
+    engine: PG
+    version: "16"
+    size: db-s-1vcpu-1gb
+    num_nodes: 1
+
+# Note: Kafka and Elasticsearch require external services
+# Options:
+# 1. Use Aiven for Kafka/Elasticsearch (DO marketplace)
+# 2. Use self-hosted on Droplets
+# 3. Use Elastic Cloud / Confluent Cloud
