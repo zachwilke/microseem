@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/socr/o365-monitor/internal/database"
+	"github.com/socr/o365-monitor/internal/elasticsearch"
+	"github.com/socr/o365-monitor/internal/middleware"
 	"github.com/socr/o365-monitor/internal/models"
 )
 
@@ -26,42 +29,58 @@ func RegisterInvestigationRoutes(r chi.Router) {
 }
 
 func ListInvestigations(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgID(r.Context())
+
 	var invs []models.Investigation
-	if err := database.DB.Order("updated_at desc").Find(&invs).Error; err != nil {
+	if err := database.DB.Where("organization_id = ?", orgID).Order("updated_at desc").Find(&invs).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(invs)
 }
 
 func CreateInvestigation(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgID(r.Context())
+
 	var inv models.Investigation
 	if err := json.NewDecoder(r.Body).Decode(&inv); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	// Set organization ID
+	inv.OrganizationID = orgID
+
 	if err := database.DB.Create(&inv).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(inv)
 }
 
 func GetInvestigation(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgID(r.Context())
 	id := chi.URLParam(r, "id")
+
 	var inv models.Investigation
-	if err := database.DB.First(&inv, "id = ?", id).Error; err != nil {
+	if err := database.DB.First(&inv, "id = ? AND organization_id = ?", id, orgID).Error; err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(inv)
 }
 
 func UpdateInvestigation(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgID(r.Context())
 	id := chi.URLParam(r, "id")
+
 	var inv models.Investigation
-	if err := database.DB.First(&inv, "id = ?", id).Error; err != nil {
+	if err := database.DB.First(&inv, "id = ? AND organization_id = ?", id, orgID).Error; err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
@@ -81,23 +100,36 @@ func UpdateInvestigation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(inv)
 }
 
 func DeleteInvestigation(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgID(r.Context())
 	id := chi.URLParam(r, "id")
-	if err := database.DB.Delete(&models.Investigation{}, "id = ?", id).Error; err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+	result := database.DB.Delete(&models.Investigation{}, "id = ? AND organization_id = ?", id, orgID)
+	if result.Error != nil {
+		http.Error(w, result.Error.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	if result.RowsAffected == 0 {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
-// ExportInvestigationCsv streams the logs based on the investigation filters
+// ExportInvestigationCsv streams the logs based on the investigation filters from Elasticsearch
 func ExportInvestigationCsv(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgID(r.Context())
 	id := chi.URLParam(r, "id")
+
 	var inv models.Investigation
-	if err := database.DB.First(&inv, "id = ?", id).Error; err != nil {
+	if err := database.DB.First(&inv, "id = ? AND organization_id = ?", id, orgID).Error; err != nil {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
@@ -116,49 +148,45 @@ func ExportInvestigationCsv(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var state FilterState
-	// datatypes.JSON is []byte
 	json.Unmarshal(inv.Filters, &state)
 
-	// Build Query (Similar to ListLogs but for all records)
-	query := database.DB.Table("audit_logs").
-		Select("audit_logs.*, tenants.name as tenant_name").
-		Joins("left join tenants on tenants.id = audit_logs.tenant_id").
-		Order("audit_logs.creation_time desc")
+	// Build ES search params
+	params := elasticsearch.SearchParams{
+		OrgID: orgID,
+		Size:  10000, // Export limit
+	}
 
 	if state.StartDate != "" {
 		if t, err := time.Parse(time.RFC3339, state.StartDate); err == nil {
-			query = query.Where("audit_logs.creation_time >= ?", t)
+			params.StartTime = &t
 		}
 	}
 	if state.EndDate != "" {
 		if t, err := time.Parse(time.RFC3339, state.EndDate); err == nil {
-			query = query.Where("audit_logs.creation_time <= ?", t)
+			params.EndTime = &t
 		}
 	}
 
-	// Apply Filters
+	params.Query = state.SearchQuery
+	params.Fuzzy = state.IsFuzzy
+
 	for _, f := range state.Filters {
 		if f.Value == "" {
 			continue
 		}
-		if f.Operator == "=" {
-			filterMap := map[string]interface{}{f.Field: f.Value}
-			filterJson, _ := json.Marshal(filterMap)
-			query = query.Where("audit_logs.raw_data @> ?", string(filterJson))
-		} else if f.Operator == "contains" {
-			query = query.Where("audit_logs.raw_data ->> ? ILIKE ?", f.Field, "%"+f.Value+"%")
-		}
+		params.Filters = append(params.Filters, elasticsearch.Filter{
+			Field:    f.Field,
+			Operator: f.Operator,
+			Value:    f.Value,
+		})
 	}
 
-	// Search
-	if state.SearchQuery != "" {
-		q := state.SearchQuery
-		likeQ := "%" + q + "%"
-		if state.IsFuzzy {
-			query = query.Where("audit_logs.operation % ? OR audit_logs.user_id % ? OR audit_logs.raw_data::text % ?", q, q, q)
-		} else {
-			query = query.Where("audit_logs.operation ILIKE ? OR audit_logs.user_id ILIKE ? OR audit_logs.raw_data::text ILIKE ?", likeQ, likeQ, likeQ)
-		}
+	// Execute search
+	ctx := context.Background()
+	result, err := elasticsearch.SearchLogs(ctx, params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "text/csv")
@@ -168,37 +196,18 @@ func ExportInvestigationCsv(w http.ResponseWriter, r *http.Request) {
 	defer writer.Flush()
 
 	// Write Header
-	writer.Write([]string{"Time", "Tenant", "Operation", "User", "IP", "Workload", "Details"})
+	writer.Write([]string{"Time", "Tenant", "Operation", "User", "IP", "Workload", "City", "Country"})
 
-	// Batch fetch to avoid memory overload
-	rows, err := query.Rows()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		// We need to scan into a struct compatible with scan or Scan supports map?
-		// GORM Rows.Scan needs variables.
-		// Let's use database.DB.ScanRows if possible, or just struct scan.
-		type Result struct {
-			models.AuditLog
-			TenantName string
-		}
-		var res Result
-		database.DB.ScanRows(rows, &res)
-
-		// Create CSV Row
-		rawDataStr := string(res.RawData)
+	for _, doc := range result.Logs {
 		row := []string{
-			res.CreationTime.Format(time.RFC3339),
-			res.TenantName,
-			res.Operation,
-			res.UserId,
-			res.ClientIP,
-			res.Workload,
-			rawDataStr,
+			doc.CreationTime.Format(time.RFC3339),
+			doc.TenantID, // Would need lookup for name
+			doc.Operation,
+			doc.UserID,
+			doc.ClientIP,
+			doc.Workload,
+			doc.City,
+			doc.CountryCode,
 		}
 		writer.Write(row)
 	}

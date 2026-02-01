@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"net/http"
-	"time"
 
+	"github.com/google/uuid"
 	"github.com/socr/o365-monitor/internal/database"
+	"github.com/socr/o365-monitor/internal/elasticsearch"
+	"github.com/socr/o365-monitor/internal/middleware"
 	"github.com/socr/o365-monitor/internal/models"
-	"gorm.io/gorm"
 )
 
 type StatsResponse struct {
@@ -28,84 +30,59 @@ type VolumeItem struct {
 }
 
 func GetStats(w http.ResponseWriter, r *http.Request) {
-	stats := StatsResponse{}
+	orgID := middleware.GetOrgID(r.Context())
 
-	// Date Range (default 24h)
-	now := time.Now()
-	last24h := now.Add(-24 * time.Hour)
-
-	// Base Queries
-	logQuery := database.DB.Model(&models.AuditLog{}).Where("creation_time > ?", last24h)
-	alertQuery := database.DB.Model(&models.Alert{}).Where("created_at > ?", last24h)
-
-	// Filter by Tenant
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID != "" {
-		logQuery = logQuery.Where("tenant_id = ?", tenantID)
-		alertQuery = alertQuery.Where("tenant_id = ?", tenantID) // Assuming alerts will have tenant_id soon, or this is a placeholder
-	}
-
-	// Total Logs 24h
-	logQuery.Count(&stats.Total24h)
-
-	// Total Alerts 24h
-	alertQuery.Count(&stats.TotalAlerts24h)
-
-	// Top Users
-	database.DB.Model(&models.AuditLog{}).
-		Select("user_id as key, count(*) as count").
-		Where("creation_time > ?", last24h).
-		Scopes(func(db *gorm.DB) *gorm.DB {
-			if tenantID != "" {
-				return db.Where("tenant_id = ?", tenantID)
-			}
-			return db
-		}).
-		Group("user_id").
-		Order("count desc").
-		Limit(5).
-		Scan(&stats.TopUsers)
-
-	// Top Operations
-	database.DB.Model(&models.AuditLog{}).
-		Select("operation as key, count(*) as count").
-		Where("creation_time > ?", last24h).
-		Scopes(func(db *gorm.DB) *gorm.DB {
-			if tenantID != "" {
-				return db.Where("tenant_id = ?", tenantID)
-			}
-			return db
-		}).
-		Group("operation").
-		Order("count desc").
-		Limit(5).
-		Scan(&stats.TopOperations)
-
-	// Volume History (Last 24 hours grouped by hour)
-	volumeSQL := `
-		SELECT to_char(creation_time, 'HH24:00') as time, count(*) as count
-		FROM audit_logs
-		WHERE creation_time > ?
-	`
-	args := []interface{}{last24h}
-
-	if tenantID != "" {
-		volumeSQL += " AND tenant_id = ?"
-		args = append(args, tenantID)
-	}
-
-	volumeSQL += " GROUP BY 1 ORDER BY 1"
-
-	rows, err := database.DB.Raw(volumeSQL, args...).Rows()
-
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var v VolumeItem
-			rows.Scan(&v.Time, &v.Count)
-			stats.VolumeHistory = append(stats.VolumeHistory, v)
+	// Get tenant filter if provided
+	var tenantID *uuid.UUID
+	tenantIDStr := r.URL.Query().Get("tenant_id")
+	if tenantIDStr != "" {
+		if tid, err := uuid.Parse(tenantIDStr); err == nil {
+			tenantID = &tid
 		}
 	}
+
+	// Get stats from Elasticsearch
+	ctx := context.Background()
+	esStats, err := elasticsearch.GetStats(ctx, orgID, tenantID)
+	if err != nil {
+		// Fall back to empty stats on error
+		respondJSON(w, StatsResponse{})
+		return
+	}
+
+	stats := StatsResponse{
+		Total24h:      esStats.TotalLogs,
+		TopUsers:      make([]CountItem, 0),
+		TopOperations: make([]CountItem, 0),
+		VolumeHistory: make([]VolumeItem, 0),
+	}
+
+	// Convert ES results to API format
+	for _, u := range esStats.TopUsers {
+		stats.TopUsers = append(stats.TopUsers, CountItem{
+			Key:   u.Key,
+			Count: u.Count,
+		})
+	}
+
+	for _, o := range esStats.TopOperations {
+		stats.TopOperations = append(stats.TopOperations, CountItem{
+			Key:   o.Key,
+			Count: o.Count,
+		})
+	}
+
+	for _, v := range esStats.VolumeHistory {
+		stats.VolumeHistory = append(stats.VolumeHistory, VolumeItem{
+			Time:  v.Time.Format("15:04"),
+			Count: v.Count,
+		})
+	}
+
+	// Get alert count from PostgreSQL (alerts still stored there)
+	database.DB.Model(&models.Alert{}).
+		Where("organization_id = ? AND created_at > NOW() - INTERVAL '24 hours'", orgID).
+		Count(&stats.TotalAlerts24h)
 
 	respondJSON(w, stats)
 }

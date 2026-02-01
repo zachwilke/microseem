@@ -19,11 +19,12 @@ const (
 
 // AlertRule defines a condition to watch for
 type AlertRule struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Severity    Severity  `json:"severity"`
-	Enabled     bool      `json:"enabled" gorm:"default:true"`
+	ID             uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index" json:"organization_id"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description"`
+	Severity       Severity  `json:"severity"`
+	Enabled        bool      `json:"enabled" gorm:"default:true"`
 
 	// Simple matching logic for now: Field == Value
 	// e.g. "Operation" == "UserLoggedIn"
@@ -38,10 +39,11 @@ type AlertRule struct {
 
 // Alert represents a triggered event
 type Alert struct {
-	ID       uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
-	RuleID   uuid.UUID `json:"rule_id"`
-	RuleName string    `json:"rule_name"` // Snapshot of rule name
-	Severity Severity  `json:"severity"`
+	ID             uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index" json:"organization_id"`
+	RuleID         uuid.UUID `json:"rule_id"`
+	RuleName       string    `json:"rule_name"` // Snapshot of rule name
+	Severity       Severity  `json:"severity"`
 
 	LogID       uuid.UUID `json:"log_id"`
 	Description string    `json:"description"` // e.g. "UserLoggedIn matches Operation"

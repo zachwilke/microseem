@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { useAuth } from '@clerk/clerk-react';
 import LogDetailsModal from './LogDetailsModal';
 import { TableVirtuoso } from 'react-virtuoso';
+import { getWebSocketUrl } from '../lib/api';
 
 const MAX_LOGS = 5000;
 
@@ -21,21 +23,28 @@ interface LiveLogsProps {
 }
 
 const LiveLogs: React.FC<LiveLogsProps> = ({ tenantId }) => {
+    const { getToken } = useAuth();
     const [logs, setLogs] = useState<Log[]>([]);
     const [isConnected, setIsConnected] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedLog, setSelectedLog] = useState<Log | null>(null);
-    const [stats, setStats] = useState({ ingestRate: 0, errorRate: 0, lagSeconds: 0 }); // Consolidated stats
+    const [stats, setStats] = useState({ ingestRate: 0, errorRate: 0, lagSeconds: 0 });
     const wsRef = useRef<WebSocket | null>(null);
     const logBuffer = useRef<Log[]>([]);
 
-    const connectWS = () => {
+    const connectWS = async () => {
         if (wsRef.current) wsRef.current.close();
 
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const host = "localhost:8080";
-        const ws = new WebSocket(`${protocol}//${host}/api/ws`);
+        // Get JWT token for WebSocket auth
+        const token = await getToken();
+        if (!token) {
+            console.error('No auth token available');
+            return;
+        }
+
+        const wsUrl = getWebSocketUrl(token);
+        const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -46,6 +55,11 @@ const LiveLogs: React.FC<LiveLogsProps> = ({ tenantId }) => {
         ws.onclose = () => {
             setIsConnected(false);
             console.log('Live Stream Disconnected');
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            setIsConnected(false);
         };
 
         ws.onmessage = (event) => {
@@ -79,10 +93,15 @@ const LiveLogs: React.FC<LiveLogsProps> = ({ tenantId }) => {
 
     const fetchRecentLogs = async () => {
         try {
+            const token = await getToken();
             let url = 'http://localhost:8080/api/logs?limit=' + MAX_LOGS;
             if (tenantId) url += `&tenant_id=${tenantId}`;
 
-            const response = await fetch(url);
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
             if (response.ok) {
                 const data = await response.json();
                 if (Array.isArray(data)) {

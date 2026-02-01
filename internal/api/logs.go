@@ -1,14 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/socr/o365-monitor/internal/database"
-	"github.com/socr/o365-monitor/internal/models"
+	"github.com/google/uuid"
+	"github.com/socr/o365-monitor/internal/elasticsearch"
+	"github.com/socr/o365-monitor/internal/middleware"
 )
 
 func RegisterLogRoutes(r chi.Router) {
@@ -17,31 +18,25 @@ func RegisterLogRoutes(r chi.Router) {
 
 type Filter struct {
 	Field    string `json:"field"`
-	Operator string `json:"operator"` // "=", "contains"
+	Operator string `json:"operator"` // "=", "contains", "!="
 	Value    string `json:"value"`
 }
 
 func ListLogs(w http.ResponseWriter, r *http.Request) {
-	// Custom result struct to include TenantName
-	type LogWithTenant struct {
-		models.AuditLog
-		TenantName string `json:"tenant_name"`
+	orgID := middleware.GetOrgID(r.Context())
+
+	// Build search params
+	params := elasticsearch.SearchParams{
+		OrgID: orgID,
+		Size:  100,
 	}
-
-	var results []LogWithTenant
-
-	// Select specific fields or all from logs, plus tenant name
-	// GORM Join
-	query := database.DB.Table("audit_logs").
-		Select("audit_logs.*, tenants.name as tenant_name").
-		Joins("left join tenants on tenants.id = audit_logs.tenant_id").
-		Order("audit_logs.creation_time desc").
-		Limit(100)
 
 	// Tenant Filter
 	tenantID := r.URL.Query().Get("tenant_id")
 	if tenantID != "" {
-		query = query.Where("audit_logs.tenant_id = ?", tenantID)
+		if tid, err := uuid.Parse(tenantID); err == nil {
+			params.TenantID = &tid
+		}
 	}
 
 	// Date Range Params
@@ -50,82 +45,87 @@ func ListLogs(w http.ResponseWriter, r *http.Request) {
 
 	if startDate != "" {
 		if t, err := time.Parse(time.RFC3339, startDate); err == nil {
-			query = query.Where("audit_logs.creation_time >= ?", t)
+			params.StartTime = &t
 		}
 	}
 	if endDate != "" {
 		if t, err := time.Parse(time.RFC3339, endDate); err == nil {
-			query = query.Where("audit_logs.creation_time <= ?", t)
+			params.EndTime = &t
 		}
 	}
 
-	// Advanced Filters (JSON array in 'filters' param)
+	// Search Query
+	params.Query = r.URL.Query().Get("q")
+	params.Fuzzy = r.URL.Query().Get("fuzzy") == "true"
+
+	// Advanced Filters
 	filtersParam := r.URL.Query().Get("filters")
 	if filtersParam != "" {
 		var filters []Filter
 		if err := json.Unmarshal([]byte(filtersParam), &filters); err == nil {
 			for _, f := range filters {
-				if f.Value == "" {
-					continue
-				}
-
-				// Map generic fields to DB columns where appropriate, else RawData
-				// For simplicity, we prioritize RawData for the "Wazuh-like" feel on arbitrary JSON fields
-
-				if f.Operator == "=" {
-					// STRICT MATCH: Use GIN Index (@>)
-					// Construct a JSON object string for containment: {"Field": "Value"}
-					// We need to be careful with types, but generally logs store strings.
-					// RawData is map[string]interface{}.
-
-					// We construct a map to marshal to JSON for the query
-					filterMap := map[string]interface{}{
-						f.Field: f.Value,
-					}
-					filterJson, _ := json.Marshal(filterMap)
-
-					// Uses GIN index if available on raw_data
-					query = query.Where("audit_logs.raw_data @> ?", string(filterJson))
-
-				} else if f.Operator == "contains" {
-					// PARTIAL MATCH: Use ->> operator and ILIKE (Index scan not guaranteed for ILIKE without trigram)
-					query = query.Where("audit_logs.raw_data ->> ? ILIKE ?", f.Field, "%"+f.Value+"%")
-				}
+				params.Filters = append(params.Filters, elasticsearch.Filter{
+					Field:    f.Field,
+					Operator: f.Operator,
+					Value:    f.Value,
+				})
 			}
 		}
 	}
 
-	// Search Query (q param)
-	q := r.URL.Query().Get("q")
-	fuzzy := r.URL.Query().Get("fuzzy") == "true"
-
-	if q != "" {
-		likeQ := "%" + q + "%"
-		if fuzzy {
-			// Use pg_trgm similarity for fuzzy matching
-			// We combine fields into a document or search individually with OR
-			// "raw_data::text % ?" uses the trgm index
-			query = query.Where(
-				"audit_logs.operation % ? OR audit_logs.user_id % ? OR audit_logs.raw_data::text % ?",
-				q, q, q,
-			)
-			// Order by similarity
-			query = query.Order(fmt.Sprintf("SIMILARITY(audit_logs.raw_data::text, '%s') DESC", q))
-		} else {
-			// Standard partial match
-			query = query.Where(
-				"audit_logs.operation ILIKE ? OR audit_logs.user_id ILIKE ? OR audit_logs.raw_data::text ILIKE ?",
-				likeQ, likeQ, likeQ,
-			)
-		}
-	}
-
-	result := query.Scan(&results) // Scan into custom struct slice
-	if result.Error != nil {
-		http.Error(w, result.Error.Error(), http.StatusInternalServerError)
+	// Execute search
+	ctx := context.Background()
+	result, err := elasticsearch.SearchLogs(ctx, params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Transform to match expected frontend format
+	type LogWithTenant struct {
+		ID             string                 `json:"id"`
+		OrganizationID string                 `json:"organization_id"`
+		TenantID       string                 `json:"tenant_id"`
+		TenantName     string                 `json:"tenant_name"`
+		RecordType     int                    `json:"record_type"`
+		CreationTime   time.Time              `json:"creation_time"`
+		Operation      string                 `json:"operation"`
+		Workload       string                 `json:"workload"`
+		UserId         string                 `json:"user_id"`
+		ClientIP       string                 `json:"client_ip"`
+		City           string                 `json:"city"`
+		CountryCode    string                 `json:"country_code"`
+		Latitude       float64                `json:"latitude"`
+		Longitude      float64                `json:"longitude"`
+		RawData        map[string]interface{} `json:"raw_data"`
+		IngestedAt     time.Time              `json:"ingested_at"`
+	}
+
+	logs := make([]LogWithTenant, 0, len(result.Logs))
+	for _, doc := range result.Logs {
+		log := LogWithTenant{
+			ID:             doc.ID,
+			OrganizationID: doc.OrganizationID,
+			TenantID:       doc.TenantID,
+			TenantName:     "", // Could be fetched separately if needed
+			RecordType:     doc.RecordType,
+			CreationTime:   doc.CreationTime,
+			Operation:      doc.Operation,
+			Workload:       doc.Workload,
+			UserId:         doc.UserID,
+			ClientIP:       doc.ClientIP,
+			City:           doc.City,
+			CountryCode:    doc.CountryCode,
+			RawData:        doc.RawData,
+			IngestedAt:     doc.IngestedAt,
+		}
+		if doc.Location != nil {
+			log.Latitude = doc.Location.Lat
+			log.Longitude = doc.Location.Lon
+		}
+		logs = append(logs, log)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(results)
+	json.NewEncoder(w).Encode(logs)
 }

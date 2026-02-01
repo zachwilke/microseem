@@ -5,18 +5,22 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/socr/o365-monitor/internal/database"
 	"github.com/socr/o365-monitor/internal/hub"
 	"github.com/socr/o365-monitor/internal/models"
 )
 
-var Engine = &AlertEngine{}
-
-type AlertEngine struct {
-	rules []models.AlertRule
-	mu    sync.RWMutex
+var Engine = &AlertEngine{
+	rulesByOrg: make(map[uuid.UUID][]models.AlertRule),
 }
 
+type AlertEngine struct {
+	rulesByOrg map[uuid.UUID][]models.AlertRule
+	mu         sync.RWMutex
+}
+
+// LoadRules loads all enabled rules for all organizations (used on startup)
 func (e *AlertEngine) LoadRules() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -26,21 +30,47 @@ func (e *AlertEngine) LoadRules() {
 		log.Printf("Error loading alert rules: %v", err)
 		return
 	}
-	e.rules = rules
-	log.Printf("AlertEngine: Loaded %d rules", len(rules))
+
+	// Clear existing rules
+	e.rulesByOrg = make(map[uuid.UUID][]models.AlertRule)
+
+	// Group by organization
+	for _, rule := range rules {
+		e.rulesByOrg[rule.OrganizationID] = append(e.rulesByOrg[rule.OrganizationID], rule)
+	}
+
+	log.Printf("AlertEngine: Loaded %d rules across %d organizations", len(rules), len(e.rulesByOrg))
 }
 
-func (e *AlertEngine) Evaluate(logEntry models.AuditLog) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+// LoadRulesForOrg loads rules for a specific organization
+func (e *AlertEngine) LoadRulesForOrg(orgID uuid.UUID) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
-	for _, rule := range e.rules {
+	var rules []models.AlertRule
+	if err := database.DB.Where("enabled = ? AND organization_id = ?", true, orgID).Find(&rules).Error; err != nil {
+		log.Printf("Error loading alert rules for org %s: %v", orgID, err)
+		return
+	}
+
+	e.rulesByOrg[orgID] = rules
+	log.Printf("AlertEngine: Loaded %d rules for org %s", len(rules), orgID)
+}
+
+// Evaluate evaluates all rules for a log entry within its organization context
+func (e *AlertEngine) Evaluate(logEntry models.AuditLog, orgID uuid.UUID) {
+	e.mu.RLock()
+	rules, ok := e.rulesByOrg[orgID]
+	e.mu.RUnlock()
+
+	if !ok || len(rules) == 0 {
+		return
+	}
+
+	for _, rule := range rules {
 		matched := false
 
-		// Simple reflection-like field access using helpers or just switch on common fields for MVP
-		// For a robust system, we'd marshal to map[string]interface{}
-		// Let's stick to the common fields defined in models.AuditLog
-
+		// Simple field matching
 		var fieldValue string
 		switch strings.ToLower(rule.Field) {
 		case "operation":
@@ -53,7 +83,7 @@ func (e *AlertEngine) Evaluate(logEntry models.AuditLog) {
 			fieldValue = logEntry.ClientIP
 		case "city":
 			fieldValue = logEntry.City
-		case "country":
+		case "country", "country_code":
 			fieldValue = logEntry.CountryCode
 		}
 
@@ -68,21 +98,23 @@ func (e *AlertEngine) Evaluate(logEntry models.AuditLog) {
 		}
 
 		if matched {
-			e.Trigger(rule, logEntry)
+			e.Trigger(rule, logEntry, orgID)
 		}
 	}
 }
 
-func (e *AlertEngine) Trigger(rule models.AlertRule, logEntry models.AuditLog) {
+// Trigger creates an alert and broadcasts it
+func (e *AlertEngine) Trigger(rule models.AlertRule, logEntry models.AuditLog, orgID uuid.UUID) {
 	alert := models.Alert{
-		RuleID:      rule.ID,
-		RuleName:    rule.Name,
-		Severity:    rule.Severity,
-		LogID:       logEntry.ID,
-		TenantID:    logEntry.TenantID,
-		Description: rule.Description,
-		RawData:     logEntry.RawData,
-		Status:      "new",
+		OrganizationID: orgID,
+		RuleID:         rule.ID,
+		RuleName:       rule.Name,
+		Severity:       rule.Severity,
+		LogID:          logEntry.ID,
+		TenantID:       logEntry.TenantID,
+		Description:    rule.Description,
+		RawData:        logEntry.RawData,
+		Status:         "new",
 	}
 
 	if err := database.DB.Create(&alert).Error; err != nil {
@@ -90,11 +122,7 @@ func (e *AlertEngine) Trigger(rule models.AlertRule, logEntry models.AuditLog) {
 		return
 	}
 
-	// In the future: Send email/slack/etc.
-
-	// Broadcast via WebSocket (reuse existing hub logic?)
-	// Let's add an Alert message type or just broadcast raw json.
-	// Frontend will need to distinguish.
-	hub.GlobalHub.BroadcastAlert(alert)
-	log.Printf("ALERT TRIGGERED: %s for %s", rule.Name, logEntry.UserId)
+	// Broadcast via WebSocket to the correct org room
+	hub.GlobalHub.BroadcastAlert(alert, orgID)
+	log.Printf("ALERT TRIGGERED: %s for %s (org: %s)", rule.Name, logEntry.UserId, orgID)
 }

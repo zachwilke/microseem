@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"strings"
@@ -10,10 +11,12 @@ import (
 
 	"os"
 
+	"github.com/google/uuid"
 	"github.com/socr/o365-monitor/internal/alerting"
 	"github.com/socr/o365-monitor/internal/database"
 	"github.com/socr/o365-monitor/internal/geoip"
 	"github.com/socr/o365-monitor/internal/hub"
+	"github.com/socr/o365-monitor/internal/kafka"
 	"github.com/socr/o365-monitor/internal/models"
 	"github.com/socr/o365-monitor/internal/o365"
 	"gorm.io/datatypes"
@@ -227,28 +230,31 @@ func processJob(workerId int, job Job) {
 		}
 
 		if len(batch) > 0 {
-			saveBatch(batch)
+			saveBatch(batch, job.Tenant.OrganizationID, job.Tenant.ID)
 		}
 	}
 }
 
-func saveBatch(logs []models.AuditLog) {
+func saveBatch(logs []models.AuditLog, orgID uuid.UUID, tenantID uuid.UUID) {
 	if len(logs) == 0 {
 		return
 	}
 
-	// Batch Insert into DB
-	// batch size of 100 is generally good for postgres
-	if err := database.DB.CreateInBatches(logs, 100).Error; err != nil {
-		log.Printf("Failed to save batch of %d logs: %v", len(logs), err)
+	// Produce to Kafka (replaces direct DB write)
+	// Kafka consumer will write to Elasticsearch
+	ctx := context.Background()
+	if err := kafka.ProduceLogs(ctx, orgID, tenantID, logs); err != nil {
+		log.Printf("Failed to produce %d logs to Kafka: %v", len(logs), err)
+		atomic.AddUint64(&errorCounter, uint64(len(logs)))
 	}
 
 	// Broadcast via WebSocket (Hub handles buffering/batching internally too)
-	hub.GlobalHub.BroadcastLogs(logs)
+	// Pass orgID for org-scoped broadcasting
+	hub.GlobalHub.BroadcastLogs(logs, orgID)
 
 	// Check for Alerts (Sequential for now, could be parallelized)
 	for _, l := range logs {
-		alerting.Engine.Evaluate(l)
+		alerting.Engine.Evaluate(l, orgID)
 	}
 
 	// Update Ingest Rate Counter
@@ -343,19 +349,20 @@ func buildAuditLog(t models.Tenant, raw map[string]interface{}, workload string)
 	}
 
 	return &models.AuditLog{
-		TenantID:     t.ID,
-		Operation:    op,
-		UserId:       userId,
-		RecordType:   int(recordType),
-		Workload:     wl,
-		CreationTime: creationTime,
-		RawData:      datatypes.JSON(jsonBytes),
-		ClientIP:     clientIP,
-		City:         city,
-		CountryCode:  countryCode,
-		Latitude:     lat,
-		Longitude:    lon,
-		IngestedAt:   time.Now(),
+		OrganizationID: t.OrganizationID,
+		TenantID:       t.ID,
+		Operation:      op,
+		UserId:         userId,
+		RecordType:     int(recordType),
+		Workload:       wl,
+		CreationTime:   creationTime,
+		RawData:        datatypes.JSON(jsonBytes),
+		ClientIP:       clientIP,
+		City:           city,
+		CountryCode:    countryCode,
+		Latitude:       lat,
+		Longitude:      lon,
+		IngestedAt:     time.Now(),
 	}
 }
 

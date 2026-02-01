@@ -9,12 +9,15 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/socr/o365-monitor/internal/api"
 	"github.com/socr/o365-monitor/internal/database"
+	"github.com/socr/o365-monitor/internal/elasticsearch"
 	"github.com/socr/o365-monitor/internal/hub"
 	"github.com/socr/o365-monitor/internal/ingest"
+	"github.com/socr/o365-monitor/internal/kafka"
+	"github.com/socr/o365-monitor/internal/middleware"
 )
 
 func main() {
-	log.Println("Starting Office 365 Audit Log Monitor...")
+	log.Println("Starting Office 365 Audit Log Monitor (Multi-Tenant SaaS)...")
 
 	// Default DSN or get from env
 	dsn := os.Getenv("DATABASE_URL")
@@ -25,6 +28,19 @@ func main() {
 	if err := database.InitDB(dsn); err != nil {
 		log.Fatalf("Error initializing database: %v", err)
 	}
+
+	// Initialize Elasticsearch
+	if err := elasticsearch.InitClient(); err != nil {
+		log.Fatalf("Error initializing Elasticsearch: %v", err)
+	}
+
+	// Initialize Kafka producer
+	if err := kafka.InitProducer(); err != nil {
+		log.Fatalf("Error initializing Kafka producer: %v", err)
+	}
+
+	// Start Kafka consumer (ES writer)
+	go kafka.StartConsumer()
 
 	// Router setup
 	r := chi.NewRouter()
@@ -39,6 +55,9 @@ func main() {
 		MaxAge:           300,
 	}))
 
+	// Initialize Clerk auth middleware
+	clerkAuth := middleware.NewClerkAuth()
+
 	// Start Poller in background
 	go ingest.StartPoller()
 
@@ -46,11 +65,18 @@ func main() {
 	go hub.GlobalHub.Run()
 
 	r.Route("/api", func(r chi.Router) {
-		api.RegisterTenantRoutes(r)
-		api.RegisterLogRoutes(r)
-		api.RegisterAlertRoutes(r)
-		api.RegisterInvestigationRoutes(r)
-		r.Get("/stats", api.GetStats)
+		// Apply Clerk auth to all API routes except WebSocket
+		r.Group(func(r chi.Router) {
+			r.Use(clerkAuth.Middleware)
+			api.RegisterOrganizationRoutes(r)
+			api.RegisterTenantRoutes(r)
+			api.RegisterLogRoutes(r)
+			api.RegisterAlertRoutes(r)
+			api.RegisterInvestigationRoutes(r)
+			r.Get("/stats", api.GetStats)
+		})
+
+		// WebSocket handles its own auth via query param
 		r.Get("/ws", hub.ServeWS)
 	})
 
