@@ -27,7 +27,7 @@ MicroSeem is a self-hosted security information and event management (SIEM) plat
 ### One-Command Deploy
 
 ```bash
-git clone https://github.com/yourusername/microseem.git
+git clone https://github.com/zachwilke/microseem.git
 cd microseem
 ./start.sh
 ```
@@ -45,7 +45,7 @@ Then open **http://localhost:3000** and follow the beautiful onboarding wizard!
 
 ```bash
 # Clone and enter directory
-git clone https://github.com/yourusername/microseem.git
+git clone https://github.com/zachwilke/microseem.git
 cd microseem
 
 # Copy and configure environment
@@ -285,5 +285,5 @@ Contributions welcome! Please read our contributing guidelines.
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/microseem/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/microseem/discussions)
+- **Issues**: [GitHub Issues](https://github.com/zachwilke/microseem/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/zachwilke/microseem/discussions)
