@@ -11,23 +11,18 @@ const getApiBase = () => {
 
 const API_BASE = getApiBase();
 
-// Create axios instance with auth interceptor
+// Create axios instance
 export const api = axios.create({
     baseURL: API_BASE,
 });
 
-// Add auth token to requests
-export const setAuthToken = (getToken: () => Promise<string | null>) => {
-    api.interceptors.request.use(async (config) => {
-        const token = await getToken();
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-        return config;
-    });
-};
+// Note: Auth interceptors are set up in AuthContext.tsx
+// This keeps auth logic centralized in one place
 
-export const getWebSocketUrl = (token: string) => {
+export const getWebSocketUrl = () => {
+    // Get token from localStorage
+    const token = localStorage.getItem('microseem_access_token');
+
     // Derive WebSocket URL from API URL or current location
     let wsHost: string;
     let wsProtocol: string;
@@ -42,7 +37,7 @@ export const getWebSocketUrl = (token: string) => {
         wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     }
 
-    return `${wsProtocol}//${wsHost}/api/ws?token=${encodeURIComponent(token)}`;
+    return `${wsProtocol}//${wsHost}/api/ws?token=${encodeURIComponent(token || '')}`;
 };
 
 export default api;

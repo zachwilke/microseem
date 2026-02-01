@@ -46,35 +46,37 @@ if [ ! -f .env ]; then
     echo -e "${YELLOW}Creating configuration file...${NC}"
     cp .env.example .env
 
-    # Generate random password
+    # Generate random password for database
     if command -v openssl &> /dev/null; then
         RANDOM_PASS=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
         sed -i.bak "s/change_me_to_a_secure_password/${RANDOM_PASS}/" .env 2>/dev/null || \
         sed -i '' "s/change_me_to_a_secure_password/${RANDOM_PASS}/" .env
         rm -f .env.bak
+
+        # Generate JWT secret
+        JWT_SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 48)
+        sed -i.bak "s/your_secure_jwt_secret_key_here_change_me/${JWT_SECRET}/" .env 2>/dev/null || \
+        sed -i '' "s/your_secure_jwt_secret_key_here_change_me/${JWT_SECRET}/" .env
+        rm -f .env.bak
+
+        echo -e "${GREEN}Generated secure passwords automatically.${NC}"
     fi
 
     echo ""
-    echo -e "${YELLOW}=================================================${NC}"
-    echo -e "${YELLOW}  ACTION REQUIRED: Configure Clerk Authentication${NC}"
-    echo -e "${YELLOW}=================================================${NC}"
+    echo -e "${GREEN}Configuration file created!${NC}"
+    echo "You can customize settings in .env if needed."
     echo ""
-    echo "1. Go to https://dashboard.clerk.com and create an app"
-    echo "2. Copy your API keys"
-    echo "3. Edit .env and set:"
-    echo "   - CLERK_SECRET_KEY"
-    echo "   - VITE_CLERK_PUBLISHABLE_KEY"
-    echo ""
-    echo -e "Run ${GREEN}nano .env${NC} or ${GREEN}vim .env${NC} to edit"
-    echo ""
-    read -p "Press Enter when you've configured Clerk keys..."
 fi
 
-# Check if Clerk keys are configured
-if grep -q "sk_test_xxxx" .env 2>/dev/null; then
-    echo -e "${RED}Error: Clerk keys not configured in .env${NC}"
-    echo "Edit .env and add your Clerk API keys from https://dashboard.clerk.com"
-    exit 1
+# Check if JWT secret is configured
+if grep -q "your_secure_jwt_secret_key_here_change_me" .env 2>/dev/null; then
+    echo -e "${YELLOW}Generating JWT secret...${NC}"
+    if command -v openssl &> /dev/null; then
+        JWT_SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 48)
+        sed -i.bak "s/your_secure_jwt_secret_key_here_change_me/${JWT_SECRET}/" .env 2>/dev/null || \
+        sed -i '' "s/your_secure_jwt_secret_key_here_change_me/${JWT_SECRET}/" .env
+        rm -f .env.bak
+    fi
 fi
 
 # Fix vm.max_map_count for Elasticsearch (Linux only)
@@ -118,6 +120,8 @@ if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
     echo -e "${GREEN}=================================================${NC}"
     echo ""
     echo "  Open in browser: http://localhost:3000"
+    echo ""
+    echo "  First time? Register a new account at the login page!"
     echo ""
     echo "  Other services:"
     echo "    - API:     http://localhost:8080"

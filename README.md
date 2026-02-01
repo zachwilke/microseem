@@ -11,18 +11,19 @@ MicroSeem is a self-hosted security information and event management (SIEM) plat
 - **Real-time Log Monitoring** - Stream M365 audit logs with WebSocket-powered live updates
 - **Beautiful Onboarding** - Guided setup to connect your tenant and configure alerts
 - **Multi-tenant Support** - Manage multiple M365 tenants and organizations
+- **Role-Based Access Control** - Admin, Technician, and Report Admin roles with granular permissions
 - **Threat Detection** - Create custom alert rules with flexible matching conditions
 - **Integration Notifications** - Send alerts to Slack, Teams, Discord, PagerDuty, and more
 - **Advanced Analytics** - Embedded Kibana dashboards for deep analysis
 - **GeoIP Enrichment** - Visualize login locations on an interactive world map
 - **Investigation Workflows** - Track and document security investigations
+- **Self-Hosted** - Keep your data on-premises with full control
 
 ## Quick Start
 
 ### Prerequisites
 
 - Docker & Docker Compose
-- [Clerk](https://clerk.com) account (free tier available)
 
 ### One-Command Deploy
 
@@ -35,11 +36,11 @@ cd microseem
 The script will:
 1. Check for Docker
 2. Create configuration from template
-3. Prompt you to add Clerk API keys
+3. Auto-generate secure passwords and JWT secret
 4. Start all services
 5. Wait for health checks
 
-Then open **http://localhost:3000** and follow the beautiful onboarding wizard!
+Then open **http://localhost:3000** and register your first admin account!
 
 ### Manual Setup
 
@@ -50,7 +51,7 @@ cd microseem
 
 # Copy and configure environment
 cp .env.example .env
-nano .env  # Add your Clerk API keys
+nano .env  # Optional: customize settings
 
 # Start everything
 docker compose up -d
@@ -61,14 +62,26 @@ docker compose ps
 
 ## Onboarding Experience
 
-When you first open MicroSeem, you'll be guided through:
+When you first open MicroSeem:
 
-1. **Welcome** - Introduction and overview
+1. **Register** - Create your admin account and organization
 2. **Connect M365** - Enter your Azure AD app credentials
 3. **Set Up Alerts** - Choose from pre-built detection rules
 4. **Ready!** - Start monitoring
 
 ![Onboarding Flow](https://via.placeholder.com/600x300?text=Onboarding+Wizard)
+
+## User Roles
+
+MicroSeem supports three user roles with different permissions:
+
+| Role | Description | Permissions |
+|------|-------------|-------------|
+| **Admin** | Full access | Manage users, settings, integrations, tenants, alerts, investigations |
+| **Technician** | Operations focus | Manage alerts and investigations, view logs and analytics |
+| **Report Admin** | Read-only reports | View logs and analytics only |
+
+The first registered user automatically becomes an Admin.
 
 ## Architecture
 
@@ -83,7 +96,7 @@ When you first open MicroSeem, you'll be guided through:
                            │ API + WebSocket
 ┌──────────────────────────▼──────────────────────────────────┐
 │  Backend API (Go + Chi)                                     │
-│  - Clerk authentication                                     │
+│  - JWT authentication with role-based access                │
 │  - M365 log ingestion                                       │
 │  - Alert engine                                             │
 │  - Notification dispatcher                                  │
@@ -92,11 +105,11 @@ When you first open MicroSeem, you'll be guided through:
 ┌───────────▼───────────┐     ┌───────────▼───────────┐
 │  PostgreSQL           │     │  Kafka                │
 │  - Organizations      │     │  - Log queue          │
-│  - Tenants            │     │  - Event streaming    │
-│  - Alert rules        │     └───────────┬───────────┘
-│  - Integrations       │                 │
-└───────────────────────┘     ┌───────────▼───────────┐
-                              │  Elasticsearch        │
+│  - Users & Sessions   │     │  - Event streaming    │
+│  - Tenants            │     └───────────┬───────────┘
+│  - Alert rules        │                 │
+│  - Integrations       │     ┌───────────▼───────────┐
+└───────────────────────┘     │  Elasticsearch        │
                               │  - Audit logs         │
                               │  - Full-text search   │
                               └───────────────────────┘
@@ -104,16 +117,13 @@ When you first open MicroSeem, you'll be guided through:
 
 ## Configuration
 
-### Required: Clerk Authentication
+### JWT Authentication
 
-1. Go to [dashboard.clerk.com](https://dashboard.clerk.com)
-2. Create a new application
-3. Get your API keys from Settings → API Keys
-4. Add to `.env`:
-   ```
-   CLERK_SECRET_KEY=sk_test_...
-   VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
-   ```
+MicroSeem uses JWT tokens for authentication. A secure JWT secret is automatically generated on first run. You can also set it manually in `.env`:
+
+```
+JWT_SECRET=your_secure_random_string_at_least_32_chars
+```
 
 ### Optional: GeoIP Database
 
@@ -128,13 +138,12 @@ See [`.env.example`](.env.example) for all options.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CLERK_SECRET_KEY` | Clerk backend API key | Required |
-| `VITE_CLERK_PUBLISHABLE_KEY` | Clerk frontend key | Required |
-| `POSTGRES_PASSWORD` | Database password | `microseem_secret` |
+| `JWT_SECRET` | Secret key for JWT tokens | Auto-generated |
+| `POSTGRES_PASSWORD` | Database password | Auto-generated |
 | `FRONTEND_PORT` | Web UI port | `3000` |
 | `API_PORT` | API port | `8080` |
 | `KIBANA_PORT` | Kibana port | `5601` |
-| `ES_HEAP_SIZE` | Elasticsearch memory | `512m` |
+| `ES_HEAP_SIZE` | Elasticsearch memory | `1g` |
 
 ## Integrations
 

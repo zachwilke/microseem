@@ -66,7 +66,16 @@ func InitDB(dsn string) error {
 
 	// Auto Migrate
 	// Note: AuditLog removed from AutoMigrate - logs now stored in Elasticsearch
-	err = DB.AutoMigrate(&models.Organization{}, &models.Tenant{}, &models.AlertRule{}, &models.Alert{}, &models.Investigation{}, &models.Integration{})
+	err = DB.AutoMigrate(
+		&models.Organization{},
+		&models.User{},
+		&models.Session{},
+		&models.Tenant{},
+		&models.AlertRule{},
+		&models.Alert{},
+		&models.Investigation{},
+		&models.Integration{},
+	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}

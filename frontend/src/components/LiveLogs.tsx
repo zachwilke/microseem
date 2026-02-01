@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { useAuth } from '@clerk/clerk-react';
 import LogDetailsModal from './LogDetailsModal';
 import { TableVirtuoso } from 'react-virtuoso';
-import { getWebSocketUrl } from '../lib/api';
+import api, { getWebSocketUrl } from '../lib/api';
 
 const MAX_LOGS = 5000;
 
@@ -23,7 +22,6 @@ interface LiveLogsProps {
 }
 
 const LiveLogs: React.FC<LiveLogsProps> = ({ tenantId }) => {
-    const { getToken } = useAuth();
     const [logs, setLogs] = useState<Log[]>([]);
     const [isConnected, setIsConnected] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
@@ -33,17 +31,10 @@ const LiveLogs: React.FC<LiveLogsProps> = ({ tenantId }) => {
     const wsRef = useRef<WebSocket | null>(null);
     const logBuffer = useRef<Log[]>([]);
 
-    const connectWS = async () => {
+    const connectWS = () => {
         if (wsRef.current) wsRef.current.close();
 
-        // Get JWT token for WebSocket auth
-        const token = await getToken();
-        if (!token) {
-            console.error('No auth token available');
-            return;
-        }
-
-        const wsUrl = getWebSocketUrl(token);
+        const wsUrl = getWebSocketUrl();
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
@@ -93,20 +84,12 @@ const LiveLogs: React.FC<LiveLogsProps> = ({ tenantId }) => {
 
     const fetchRecentLogs = async () => {
         try {
-            const token = await getToken();
-            let url = 'http://localhost:8080/api/logs?limit=' + MAX_LOGS;
+            let url = '/logs?limit=' + MAX_LOGS;
             if (tenantId) url += `&tenant_id=${tenantId}`;
 
-            const response = await fetch(url, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                },
-            });
-            if (response.ok) {
-                const data = await response.json();
-                if (Array.isArray(data)) {
-                    setLogs(data);
-                }
+            const response = await api.get(url);
+            if (Array.isArray(response.data)) {
+                setLogs(response.data);
             }
         } catch (e) {
             console.error("Failed to fetch recent logs", e);

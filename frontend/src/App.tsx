@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { SignedIn, SignedOut, RedirectToSignIn, useOrganization } from '@clerk/clerk-react';
+import { useAuth } from './contexts/AuthContext';
 import api from './lib/api';
 import Navbar from './components/Navbar';
 import Dashboard from './components/Dashboard';
@@ -14,22 +14,23 @@ import Investigations from './components/Investigations';
 import InvestigationDetail from './components/InvestigationDetail';
 import KibanaEmbed from './components/KibanaEmbed';
 import Onboarding from './components/Onboarding';
+import Login from './components/Login';
+import Register from './components/Register';
 
 function AppContent() {
-    const { organization, isLoaded: orgLoaded } = useOrganization();
+    const { user, isLoading: authLoading } = useAuth();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
     const [checkingOnboarding, setCheckingOnboarding] = useState(true);
 
     useEffect(() => {
-        if (orgLoaded && organization) {
+        if (!authLoading && user) {
             checkOnboardingStatus();
-        } else if (orgLoaded && !organization) {
-            // No organization yet - Clerk will handle org creation
+        } else if (!authLoading && !user) {
             setCheckingOnboarding(false);
             setNeedsOnboarding(false);
         }
-    }, [orgLoaded, organization]);
+    }, [authLoading, user]);
 
     const checkOnboardingStatus = async () => {
         try {
@@ -50,7 +51,7 @@ function AppContent() {
     };
 
     // Show loading while checking onboarding status
-    if (!orgLoaded || checkingOnboarding) {
+    if (authLoading || checkingOnboarding) {
         return (
             <div className="min-h-screen bg-slate-900 flex items-center justify-center">
                 <div className="text-center">
@@ -172,17 +173,41 @@ function AppContent() {
 }
 
 function App() {
-    return (
-        <>
-            <SignedOut>
-                <RedirectToSignIn />
-            </SignedOut>
+    const { isAuthenticated, isLoading } = useAuth();
 
-            <SignedIn>
-                <AppContent />
-            </SignedIn>
-        </>
-    );
+    // Show loading state
+    if (isLoading) {
+        return (
+            <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="relative w-16 h-16 mx-auto mb-4">
+                        <div className="absolute inset-0 bg-gradient-to-br from-blue-600 to-emerald-600 rounded-xl animate-pulse"></div>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <span className="text-2xl font-bold text-white">M</span>
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-center gap-2 text-slate-400">
+                        <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
+                        Loading...
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // Show auth pages for unauthenticated users
+    if (!isAuthenticated) {
+        return (
+            <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+        );
+    }
+
+    // Show main app for authenticated users
+    return <AppContent />;
 }
 
 export default App;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useOrganization } from '@clerk/clerk-react';
+import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 
 interface Integration {
@@ -129,7 +129,7 @@ const SEVERITY_OPTIONS = [
 ];
 
 const Integrations: React.FC = () => {
-    const { organization, isLoaded } = useOrganization();
+    const { user, isLoading: authLoading } = useAuth();
     const [integrations, setIntegrations] = useState<Integration[]>([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
@@ -146,10 +146,10 @@ const Integrations: React.FC = () => {
     const [editingId, setEditingId] = useState<string | null>(null);
 
     useEffect(() => {
-        if (organization) {
+        if (user) {
             fetchIntegrations();
         }
-    }, [organization]);
+    }, [user]);
 
     const fetchIntegrations = async () => {
         try {
@@ -265,7 +265,7 @@ const Integrations: React.FC = () => {
         return INTEGRATION_TYPES.find(t => t.id === type);
     };
 
-    if (!isLoaded || loading) {
+    if (authLoading || loading) {
         return (
             <div className="flex items-center justify-center h-64">
                 <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full"></div>

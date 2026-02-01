@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useUser, useOrganization } from '@clerk/clerk-react';
+import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 
 interface OnboardingProps {
@@ -14,8 +14,7 @@ const STEPS = [
 ];
 
 const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
-    const { user } = useUser();
-    const { organization } = useOrganization();
+    const { user } = useAuth();
     const [currentStep, setCurrentStep] = useState(0);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -96,8 +95,8 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     ];
 
     useEffect(() => {
-        if (user?.primaryEmailAddress?.emailAddress) {
-            setTenantForm(f => ({ ...f, contact_email: user.primaryEmailAddress?.emailAddress || '' }));
+        if (user?.email) {
+            setTenantForm(f => ({ ...f, contact_email: user.email || '' }));
         }
     }, [user]);
 
@@ -208,18 +207,18 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                 Welcome to MicroSeem
             </h1>
             <p className="text-xl text-slate-400 mb-2">
-                Hi {user?.firstName || 'there'}! Let's set up your security monitoring.
+                Hi {user?.first_name || 'there'}! Let's set up your security monitoring.
             </p>
             <p className="text-slate-500 mb-8 max-w-md mx-auto">
                 In just a few steps, you'll have real-time visibility into your Microsoft 365 environment.
             </p>
 
-            {organization && (
+            {user?.organization && (
                 <div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800/50 rounded-full border border-slate-700 mb-8">
                     <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold">
-                        {organization.name?.charAt(0).toUpperCase()}
+                        {user.organization.name?.charAt(0).toUpperCase()}
                     </div>
-                    <span className="text-slate-300">{organization.name}</span>
+                    <span className="text-slate-300">{user.organization.name}</span>
                 </div>
             )}
 

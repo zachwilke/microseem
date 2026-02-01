@@ -29,7 +29,7 @@ const (
 )
 
 func main() {
-	log.Println("Starting Office 365 Audit Log Monitor (Multi-Tenant SaaS)...")
+	log.Println("Starting MicroSeem - Microsoft 365 SIEM Platform...")
 
 	// Create root context with cancellation for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -38,7 +38,7 @@ func main() {
 	// Default DSN or get from env
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "host=localhost user=o365_user password=o365_password dbname=o365_monitor port=5432 sslmode=disable"
+		dsn = "host=localhost user=microseem password=microseem_secret dbname=microseem port=5432 sslmode=disable"
 	}
 
 	if err := database.InitDB(dsn); err != nil {
@@ -62,7 +62,7 @@ func main() {
 	r := chi.NewRouter()
 
 	// CORS setup - configurable via ALLOWED_ORIGINS env var
-	allowedOrigins := []string{"http://localhost:5173", "http://localhost:5174"}
+	allowedOrigins := []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:5174"}
 	if origins := os.Getenv("ALLOWED_ORIGINS"); origins != "" {
 		allowedOrigins = strings.Split(origins, ",")
 	}
@@ -75,9 +75,6 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
-
-	// Initialize Clerk auth middleware
-	clerkAuth := middleware.NewClerkAuth()
 
 	// Start Poller in background with context
 	go ingest.StartPoller(ctx)
@@ -93,23 +90,36 @@ func main() {
 	})
 
 	r.Route("/api", func(r chi.Router) {
-		// Apply Clerk auth to all API routes except WebSocket
+		// Public routes (no auth required)
+		api.RegisterAuthRoutes(r)
+
+		// Protected routes (require authentication)
 		r.Group(func(r chi.Router) {
-			r.Use(clerkAuth.Middleware)
+			r.Use(middleware.AuthMiddleware)
+
+			// User management
+			api.RegisterUserRoutes(r)
+
+			// Core functionality (all authenticated users)
 			api.RegisterOrganizationRoutes(r)
-			api.RegisterTenantRoutes(r)
 			api.RegisterLogRoutes(r)
 			api.RegisterAlertRoutes(r)
-			api.RegisterIntegrationRoutes(r)
 			api.RegisterInvestigationRoutes(r)
 			r.Get("/stats", api.GetStats)
+
+			// Admin-only routes
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAdmin)
+				api.RegisterTenantRoutes(r)
+				api.RegisterIntegrationRoutes(r)
+			})
 		})
 
 		// WebSocket handles its own auth via query param
 		r.Get("/ws", hub.ServeWS)
 	})
 
-	// Get port from environment (required by DO App Platform)
+	// Get port from environment
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

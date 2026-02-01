@@ -2,77 +2,119 @@ package middleware
 
 import (
 	"context"
-	"crypto/rsa"
-	"encoding/base64"
-	"encoding/json"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	"log"
-	"math/big"
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/socr/o365-monitor/internal/database"
 	"github.com/socr/o365-monitor/internal/models"
+	"golang.org/x/crypto/bcrypt"
 )
 
-// Context keys for organization data
+// Context keys
 type contextKey string
 
 const (
-	OrgIDKey      contextKey = "org_id"
-	ClerkOrgIDKey contextKey = "clerk_org_id"
-	UserIDKey     contextKey = "user_id"
+	OrgIDKey  contextKey = "org_id"
+	UserIDKey contextKey = "user_id"
+	UserKey   contextKey = "user"
+	RoleKey   contextKey = "role"
 )
 
-// JWKS represents the JSON Web Key Set from Clerk
-type JWKS struct {
-	Keys []JWK `json:"keys"`
+// JWT configuration
+var (
+	jwtSecret          []byte
+	accessTokenExpiry  = 15 * time.Minute
+	refreshTokenExpiry = 7 * 24 * time.Hour
+)
+
+func init() {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		// Generate a random secret if not provided (for development)
+		randomBytes := make([]byte, 32)
+		rand.Read(randomBytes)
+		secret = hex.EncodeToString(randomBytes)
+	}
+	jwtSecret = []byte(secret)
 }
 
-// JWK represents a single JSON Web Key
-type JWK struct {
-	Kid string `json:"kid"`
-	Kty string `json:"kty"`
-	Alg string `json:"alg"`
-	Use string `json:"use"`
-	N   string `json:"n"`
-	E   string `json:"e"`
+// Claims represents JWT claims
+type Claims struct {
+	UserID         uuid.UUID   `json:"user_id"`
+	OrganizationID uuid.UUID   `json:"org_id"`
+	Email          string      `json:"email"`
+	Role           models.Role `json:"role"`
+	jwt.RegisteredClaims
 }
 
-// ClerkAuth is the authentication middleware for Clerk JWT verification
-type ClerkAuth struct {
-	jwksURL     string
-	jwksCache   *JWKS
-	jwksCacheMu sync.RWMutex
-	cacheTime   time.Time
-	cacheTTL    time.Duration
-}
-
-// NewClerkAuth creates a new ClerkAuth middleware instance
-func NewClerkAuth() *ClerkAuth {
-	// Clerk JWKS URL is derived from the frontend API domain
-	// Format: https://{clerk-frontend-api}/.well-known/jwks.json
-	clerkFrontendAPI := os.Getenv("CLERK_FRONTEND_API")
-	if clerkFrontendAPI == "" {
-		// Default to a placeholder - should be set in production
-		clerkFrontendAPI = "https://clerk.your-domain.com"
+// GenerateAccessToken creates a new JWT access token
+func GenerateAccessToken(user *models.User) (string, error) {
+	claims := Claims{
+		UserID:         user.ID,
+		OrganizationID: user.OrganizationID,
+		Email:          user.Email,
+		Role:           user.Role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(accessTokenExpiry)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   user.ID.String(),
+		},
 	}
 
-	return &ClerkAuth{
-		jwksURL:  clerkFrontendAPI + "/.well-known/jwks.json",
-		cacheTTL: 1 * time.Hour,
-	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtSecret)
 }
 
-// Middleware returns the HTTP middleware function
-func (ca *ClerkAuth) Middleware(next http.Handler) http.Handler {
+// GenerateRefreshToken creates a random refresh token
+func GenerateRefreshToken() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+// ValidateAccessToken validates and parses a JWT access token
+func ValidateAccessToken(tokenString string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return jwtSecret, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
+		return claims, nil
+	}
+
+	return nil, fmt.Errorf("invalid token")
+}
+
+// HashPassword hashes a password using bcrypt
+func HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
+}
+
+// CheckPassword compares a password with a hash
+func CheckPassword(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
+
+// AuthMiddleware validates JWT tokens and injects user context
+func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Extract token from Authorization header
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			http.Error(w, `{"error": "missing authorization header"}`, http.StatusUnauthorized)
@@ -85,182 +127,48 @@ func (ca *ClerkAuth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		tokenString := parts[1]
-
-		// Parse and validate the JWT
-		token, err := ca.parseAndValidateToken(tokenString)
+		claims, err := ValidateAccessToken(parts[1])
 		if err != nil {
-			log.Printf("Token validation failed: %v", err)
-			http.Error(w, fmt.Sprintf(`{"error": "invalid token: %s"}`, err.Error()), http.StatusUnauthorized)
+			http.Error(w, `{"error": "invalid or expired token"}`, http.StatusUnauthorized)
 			return
 		}
 
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok || !token.Valid {
-			http.Error(w, `{"error": "invalid token claims"}`, http.StatusUnauthorized)
-			return
-		}
-
-		// Extract Clerk org_id from claims
-		clerkOrgID, _ := claims["org_id"].(string)
-		if clerkOrgID == "" {
-			// Try alternate claim locations
-			if orgClaim, ok := claims["org"].(map[string]interface{}); ok {
-				clerkOrgID, _ = orgClaim["id"].(string)
-			}
-		}
-
-		if clerkOrgID == "" {
-			http.Error(w, `{"error": "no organization context in token"}`, http.StatusForbidden)
-			return
-		}
-
-		// Extract user ID from claims
-		userID, _ := claims["sub"].(string)
-
-		// Look up or create the internal organization
-		org, err := ca.getOrCreateOrganization(clerkOrgID)
-		if err != nil {
-			log.Printf("Failed to get/create organization: %v", err)
-			http.Error(w, `{"error": "organization lookup failed"}`, http.StatusInternalServerError)
-			return
-		}
-
-		// Inject organization context into request
+		// Inject claims into context
 		ctx := r.Context()
-		ctx = context.WithValue(ctx, OrgIDKey, org.ID)
-		ctx = context.WithValue(ctx, ClerkOrgIDKey, clerkOrgID)
-		ctx = context.WithValue(ctx, UserIDKey, userID)
+		ctx = context.WithValue(ctx, UserIDKey, claims.UserID)
+		ctx = context.WithValue(ctx, OrgIDKey, claims.OrganizationID)
+		ctx = context.WithValue(ctx, RoleKey, claims.Role)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// parseAndValidateToken parses and validates the JWT token
-func (ca *ClerkAuth) parseAndValidateToken(tokenString string) (*jwt.Token, error) {
-	// Fetch JWKS if not cached or cache expired
-	jwks, err := ca.getJWKS()
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
-	}
+// RequireRole middleware checks if the user has one of the required roles
+func RequireRole(roles ...models.Role) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			userRole := GetRole(r.Context())
 
-	// Parse the token
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Verify signing method
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-
-		// Get the key ID from the token header
-		kid, ok := token.Header["kid"].(string)
-		if !ok {
-			return nil, fmt.Errorf("missing kid in token header")
-		}
-
-		// Find the matching key in JWKS
-		for _, key := range jwks.Keys {
-			if key.Kid == kid {
-				return ca.jwkToPublicKey(key)
+			for _, role := range roles {
+				if userRole == role {
+					next.ServeHTTP(w, r)
+					return
+				}
 			}
-		}
 
-		return nil, fmt.Errorf("no matching key found for kid: %s", kid)
-	})
-
-	return token, err
+			http.Error(w, `{"error": "insufficient permissions"}`, http.StatusForbidden)
+		})
+	}
 }
 
-// getJWKS fetches and caches the JWKS
-func (ca *ClerkAuth) getJWKS() (*JWKS, error) {
-	ca.jwksCacheMu.RLock()
-	if ca.jwksCache != nil && time.Since(ca.cacheTime) < ca.cacheTTL {
-		defer ca.jwksCacheMu.RUnlock()
-		return ca.jwksCache, nil
-	}
-	ca.jwksCacheMu.RUnlock()
-
-	// Fetch new JWKS
-	ca.jwksCacheMu.Lock()
-	defer ca.jwksCacheMu.Unlock()
-
-	// Double-check after acquiring write lock
-	if ca.jwksCache != nil && time.Since(ca.cacheTime) < ca.cacheTTL {
-		return ca.jwksCache, nil
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(ca.jwksURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("JWKS request failed with status: %d", resp.StatusCode)
-	}
-
-	var jwks JWKS
-	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
-		return nil, fmt.Errorf("failed to decode JWKS: %w", err)
-	}
-
-	ca.jwksCache = &jwks
-	ca.cacheTime = time.Now()
-
-	return &jwks, nil
+// RequireAdmin middleware ensures the user is an admin
+func RequireAdmin(next http.Handler) http.Handler {
+	return RequireRole(models.RoleAdmin)(next)
 }
 
-// jwkToPublicKey converts a JWK to an RSA public key
-func (ca *ClerkAuth) jwkToPublicKey(jwk JWK) (*rsa.PublicKey, error) {
-	if jwk.Kty != "RSA" {
-		return nil, fmt.Errorf("unsupported key type: %s", jwk.Kty)
-	}
-
-	// Decode the modulus (n)
-	nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode modulus: %w", err)
-	}
-	n := new(big.Int).SetBytes(nBytes)
-
-	// Decode the exponent (e)
-	eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode exponent: %w", err)
-	}
-	e := new(big.Int).SetBytes(eBytes)
-
-	return &rsa.PublicKey{
-		N: n,
-		E: int(e.Int64()),
-	}, nil
-}
-
-// getOrCreateOrganization looks up or creates an organization by Clerk org ID
-func (ca *ClerkAuth) getOrCreateOrganization(clerkOrgID string) (*models.Organization, error) {
-	var org models.Organization
-
-	// Try to find existing organization
-	result := database.DB.Where("clerk_org_id = ?", clerkOrgID).First(&org)
-	if result.Error == nil {
-		return &org, nil
-	}
-
-	// Create new organization
-	org = models.Organization{
-		ClerkOrgID:       clerkOrgID,
-		Name:             "Organization " + clerkOrgID[:8], // Will be updated via Clerk webhook
-		SubscriptionTier: "free",
-		Status:           "active",
-		MaxTenants:       5,
-	}
-
-	if err := database.DB.Create(&org).Error; err != nil {
-		return nil, fmt.Errorf("failed to create organization: %w", err)
-	}
-
-	log.Printf("Created new organization: %s (Clerk ID: %s)", org.ID, clerkOrgID)
-	return &org, nil
+// RequireAdminOrTechnician middleware ensures the user is admin or technician
+func RequireAdminOrTechnician(next http.Handler) http.Handler {
+	return RequireRole(models.RoleAdmin, models.RoleTechnician)(next)
 }
 
 // GetOrgID extracts the organization ID from the request context
@@ -271,18 +179,18 @@ func GetOrgID(ctx context.Context) uuid.UUID {
 	return uuid.Nil
 }
 
-// GetClerkOrgID extracts the Clerk organization ID from the request context
-func GetClerkOrgID(ctx context.Context) string {
-	if clerkOrgID, ok := ctx.Value(ClerkOrgIDKey).(string); ok {
-		return clerkOrgID
+// GetUserID extracts the user ID from the request context
+func GetUserID(ctx context.Context) uuid.UUID {
+	if userID, ok := ctx.Value(UserIDKey).(uuid.UUID); ok {
+		return userID
 	}
-	return ""
+	return uuid.Nil
 }
 
-// GetUserID extracts the user ID from the request context
-func GetUserID(ctx context.Context) string {
-	if userID, ok := ctx.Value(UserIDKey).(string); ok {
-		return userID
+// GetRole extracts the user role from the request context
+func GetRole(ctx context.Context) models.Role {
+	if role, ok := ctx.Value(RoleKey).(models.Role); ok {
+		return role
 	}
 	return ""
 }

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useOrganization } from '@clerk/clerk-react';
+import { useAuth } from '../contexts/AuthContext';
 
 // Pre-configured dashboard views
 const DASHBOARD_PRESETS = [
@@ -44,16 +44,16 @@ const TIME_RANGES = [
 ];
 
 const KibanaEmbed: React.FC = () => {
-    const { organization, isLoaded } = useOrganization();
+    const { user, isLoading } = useAuth();
     const kibanaUrl = import.meta.env.VITE_KIBANA_URL || 'http://localhost:5601';
 
     const [activePreset, setActivePreset] = useState(DASHBOARD_PRESETS[0]);
     const [timeRange, setTimeRange] = useState('now-24h');
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoadingIframe, setIsLoadingIframe] = useState(true);
 
     // Build the Kibana URL with org-specific index pattern
     const iframeSrc = useMemo(() => {
-        if (!organization?.id) return null;
+        if (!user?.organization_id) return null;
 
         const indexPattern = `logs-*`;
         const columns = ['creation_time', 'operation', 'user_id', 'workload', 'client_ip', 'country_code'];
@@ -69,9 +69,9 @@ const KibanaEmbed: React.FC = () => {
         url += `&_a=(columns:!(${columns.join(',')}),filters:!(),index:'${indexPattern}',interval:auto,query:(language:kuery,query:'${encodeURIComponent(query)}'),sort:!(!(creation_time,desc)))`;
 
         return url;
-    }, [organization?.id, kibanaUrl, activePreset, timeRange]);
+    }, [user?.organization_id, kibanaUrl, activePreset, timeRange]);
 
-    if (!isLoaded) {
+    if (isLoading) {
         return (
             <div className="flex-1 flex items-center justify-center bg-slate-900/40 rounded-xl border border-white/5">
                 <div className="flex items-center gap-3 text-slate-500">
@@ -82,7 +82,7 @@ const KibanaEmbed: React.FC = () => {
         );
     }
 
-    if (!organization) {
+    if (!user?.organization) {
         return (
             <div className="flex-1 flex items-center justify-center bg-slate-900/40 rounded-xl border border-white/5">
                 <div className="text-center p-8">
@@ -105,7 +105,7 @@ const KibanaEmbed: React.FC = () => {
                 <div>
                     <h1 className="text-2xl font-bold text-white">Analytics & Reports</h1>
                     <p className="text-slate-400 text-sm mt-1">
-                        Viewing data for <span className="text-white font-medium">{organization.name}</span>
+                        Viewing data for <span className="text-white font-medium">{user.organization.name}</span>
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -139,7 +139,7 @@ const KibanaEmbed: React.FC = () => {
                 {DASHBOARD_PRESETS.map(preset => (
                     <button
                         key={preset.id}
-                        onClick={() => { setActivePreset(preset); setIsLoading(true); }}
+                        onClick={() => { setActivePreset(preset); setIsLoadingIframe(true); }}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
                             activePreset.id === preset.id
                                 ? 'bg-blue-600 text-white'
@@ -155,7 +155,7 @@ const KibanaEmbed: React.FC = () => {
             {/* Kibana iFrame Container */}
             <div className="flex-1 bg-slate-900/40 rounded-xl overflow-hidden border border-white/5 relative min-h-[500px]">
                 {/* Loading Overlay */}
-                {isLoading && (
+                {isLoadingIframe && (
                     <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center z-10">
                         <div className="flex flex-col items-center gap-3">
                             <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full"></div>
@@ -170,7 +170,7 @@ const KibanaEmbed: React.FC = () => {
                         className="w-full h-full border-0"
                         title={`Kibana - ${activePreset.name}`}
                         sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                        onLoad={() => setIsLoading(false)}
+                        onLoad={() => setIsLoadingIframe(false)}
                     />
                 ) : (
                     <div className="flex items-center justify-center h-full text-slate-500">

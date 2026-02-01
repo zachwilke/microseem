@@ -10,11 +10,12 @@ import (
 // Organization represents a customer organization (multi-tenant SaaS)
 type Organization struct {
 	ID               uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	Name             string    `json:"name"`
-	ClerkOrgID       string    `gorm:"uniqueIndex" json:"clerk_org_id"`
+	Name             string    `gorm:"not null" json:"name"`
+	Slug             string    `gorm:"uniqueIndex" json:"slug"` // URL-friendly identifier
 	SubscriptionTier string    `json:"subscription_tier" gorm:"default:'free'"`
 	Status           string    `json:"status" gorm:"default:'active'"`
 	MaxTenants       int       `json:"max_tenants" gorm:"default:5"`
+	MaxUsers         int       `json:"max_users" gorm:"default:10"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
