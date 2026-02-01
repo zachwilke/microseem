@@ -1,6 +1,6 @@
 module github.com/socr/o365-monitor
 
-go 1.25.5
+go 1.22
 
 require (
 	github.com/elastic/go-elasticsearch/v8 v8.17.0
