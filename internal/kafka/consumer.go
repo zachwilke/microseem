@@ -9,18 +9,18 @@ import (
 	"time"
 
 	"github.com/segmentio/kafka-go"
-	"github.com/socr/o365-monitor/internal/elasticsearch"
+	"github.com/socr/o365-monitor/internal/store"
 )
 
 const (
-	ConsumerGroup   = "es-writer"
-	maxRetries      = 3
-	retryBackoff    = 1 * time.Second
-	commitInterval  = 1 * time.Second
-	maxWait         = 10 * time.Second
+	ConsumerGroup  = "log-store-writer"
+	maxRetries     = 3
+	retryBackoff   = 1 * time.Second
+	commitInterval = 1 * time.Second
+	maxWait        = 10 * time.Second
 )
 
-// StartConsumer starts the Kafka consumer that writes to Elasticsearch
+// StartConsumer starts the Kafka consumer that writes to the active log store
 // It respects context cancellation for graceful shutdown
 func StartConsumer(ctx context.Context) {
 	brokers := os.Getenv("KAFKA_BROKERS")
@@ -90,7 +90,7 @@ func processMessage(ctx context.Context, msg kafka.Message) error {
 		return nil
 	}
 
-	// Retry logic for ES writes
+	// Retry logic for log store writes
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		select {
@@ -99,18 +99,18 @@ func processMessage(ctx context.Context, msg kafka.Message) error {
 		default:
 		}
 
-		// Use context with timeout for ES write
+		// Use context with timeout for log store write
 		writeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		err := elasticsearch.BulkIndexLogs(writeCtx, batch.OrganizationID, batch.Logs)
+		err := store.BulkInsertLogs(writeCtx, batch.OrganizationID, batch.Logs)
 		cancel()
 
 		if err == nil {
-			log.Printf("Indexed %d logs to ES for org %s", len(batch.Logs), batch.OrganizationID)
+			log.Printf("Indexed %d logs to log store for org %s", len(batch.Logs), batch.OrganizationID)
 			return nil
 		}
 
 		lastErr = err
-		log.Printf("ES write attempt %d/%d failed: %v", attempt, maxRetries, err)
+		log.Printf("Log store write attempt %d/%d failed: %v", attempt, maxRetries, err)
 
 		if attempt < maxRetries {
 			select {

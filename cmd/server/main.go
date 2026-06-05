@@ -13,12 +13,16 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/socr/o365-monitor/internal/api"
+	"github.com/socr/o365-monitor/internal/clickhouse"
 	"github.com/socr/o365-monitor/internal/database"
 	"github.com/socr/o365-monitor/internal/elasticsearch"
+	"github.com/socr/o365-monitor/internal/eventbus"
 	"github.com/socr/o365-monitor/internal/hub"
 	"github.com/socr/o365-monitor/internal/ingest"
 	"github.com/socr/o365-monitor/internal/kafka"
 	"github.com/socr/o365-monitor/internal/middleware"
+	"github.com/socr/o365-monitor/internal/natsbus"
+	"github.com/socr/o365-monitor/internal/store"
 )
 
 const (
@@ -45,18 +49,55 @@ func main() {
 		log.Fatalf("Error initializing database: %v", err)
 	}
 
-	// Initialize Elasticsearch
-	if err := elasticsearch.InitClient(); err != nil {
-		log.Fatalf("Error initializing Elasticsearch: %v", err)
+	logStoreName := strings.ToLower(os.Getenv("MICROSEEM_LOG_STORE"))
+	if logStoreName == "" {
+		logStoreName = "elasticsearch"
 	}
 
-	// Initialize Kafka producer
-	if err := kafka.InitProducer(); err != nil {
-		log.Fatalf("Error initializing Kafka producer: %v", err)
+	switch logStoreName {
+	case "elasticsearch", "elastic":
+		if err := elasticsearch.InitClient(); err != nil {
+			log.Fatalf("Error initializing Elasticsearch: %v", err)
+		}
+		store.SetLogStore(elasticsearch.NewStore())
+		log.Println("Using Elasticsearch log store")
+	case "clickhouse":
+		clickHouseStore, err := clickhouse.NewFromEnv()
+		if err != nil {
+			log.Fatalf("Error initializing ClickHouse log store: %v", err)
+		}
+		store.SetLogStore(clickHouseStore)
+		log.Println("Using ClickHouse log store")
+	default:
+		log.Fatalf("Unsupported MICROSEEM_LOG_STORE value: %s", logStoreName)
 	}
 
-	// Start Kafka consumer (ES writer) with context
-	go kafka.StartConsumer(ctx)
+	eventBusName := strings.ToLower(os.Getenv("MICROSEEM_EVENT_BUS"))
+	if eventBusName == "" {
+		eventBusName = "kafka"
+	}
+
+	switch eventBusName {
+	case "kafka":
+		if err := kafka.InitProducer(); err != nil {
+			log.Fatalf("Error initializing Kafka producer: %v", err)
+		}
+		eventbus.SetEventBus(kafka.NewBus())
+		go kafka.StartConsumer(ctx)
+		log.Println("Using Kafka event bus")
+	case "nats", "jetstream":
+		natsBus, err := natsbus.NewFromEnv(ctx)
+		if err != nil {
+			log.Fatalf("Error initializing NATS JetStream event bus: %v", err)
+		}
+		eventbus.SetEventBus(natsBus)
+		log.Println("Using NATS JetStream event bus")
+	case "direct":
+		eventbus.SetEventBus(eventbus.NewDirectBus())
+		log.Println("Using direct log store writes; durable event bus disabled")
+	default:
+		log.Fatalf("Unsupported MICROSEEM_EVENT_BUS value: %s", eventBusName)
+	}
 
 	// Router setup
 	r := chi.NewRouter()
@@ -167,9 +208,9 @@ func main() {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
 
-	// Close Kafka producer
-	if err := kafka.Close(); err != nil {
-		log.Printf("Kafka producer close error: %v", err)
+	// Close event bus
+	if err := eventbus.Close(); err != nil {
+		log.Printf("Event bus close error: %v", err)
 	}
 
 	// Close database connection

@@ -8,8 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/socr/o365-monitor/internal/elasticsearch"
 	"github.com/socr/o365-monitor/internal/middleware"
+	"github.com/socr/o365-monitor/internal/store"
 )
 
 func RegisterLogRoutes(r chi.Router) {
@@ -26,7 +26,7 @@ func ListLogs(w http.ResponseWriter, r *http.Request) {
 	orgID := middleware.GetOrgID(r.Context())
 
 	// Build search params
-	params := elasticsearch.SearchParams{
+	params := store.SearchParams{
 		OrgID: orgID,
 		Size:  100,
 	}
@@ -64,7 +64,7 @@ func ListLogs(w http.ResponseWriter, r *http.Request) {
 		var filters []Filter
 		if err := json.Unmarshal([]byte(filtersParam), &filters); err == nil {
 			for _, f := range filters {
-				params.Filters = append(params.Filters, elasticsearch.Filter{
+				params.Filters = append(params.Filters, store.Filter{
 					Field:    f.Field,
 					Operator: f.Operator,
 					Value:    f.Value,
@@ -75,7 +75,7 @@ func ListLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Execute search
 	ctx := context.Background()
-	result, err := elasticsearch.SearchLogs(ctx, params)
+	result, err := store.SearchLogs(ctx, params)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

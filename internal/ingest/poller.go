@@ -14,9 +14,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/socr/o365-monitor/internal/alerting"
 	"github.com/socr/o365-monitor/internal/database"
+	"github.com/socr/o365-monitor/internal/eventbus"
 	"github.com/socr/o365-monitor/internal/geoip"
 	"github.com/socr/o365-monitor/internal/hub"
-	"github.com/socr/o365-monitor/internal/kafka"
 	"github.com/socr/o365-monitor/internal/models"
 	"github.com/socr/o365-monitor/internal/o365"
 	"gorm.io/datatypes"
@@ -268,10 +268,8 @@ func saveBatch(ctx context.Context, logs []models.AuditLog, orgID uuid.UUID, ten
 		return
 	}
 
-	// Produce to Kafka (replaces direct DB write)
-	// Kafka consumer will write to Elasticsearch
-	if err := kafka.ProduceLogs(ctx, orgID, tenantID, logs); err != nil {
-		log.Printf("Failed to produce %d logs to Kafka: %v", len(logs), err)
+	if err := eventbus.PublishLogs(ctx, orgID, tenantID, logs); err != nil {
+		log.Printf("Failed to publish %d logs to event bus: %v", len(logs), err)
 		atomic.AddUint64(&errorCounter, uint64(len(logs)))
 		return
 	}

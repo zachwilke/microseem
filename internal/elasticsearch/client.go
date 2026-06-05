@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	requestTimeout   = 30 * time.Second
-	maxIdleConns     = 10
-	idleConnTimeout  = 30 * time.Second
-	maxResultSize    = 10000 // Hard limit on search results
+	requestTimeout  = 30 * time.Second
+	maxIdleConns    = 10
+	idleConnTimeout = 30 * time.Second
+	maxResultSize   = 10000 // Hard limit on search results
 )
 
 var (
@@ -136,30 +136,6 @@ func GetIndexName(orgID uuid.UUID, t time.Time) string {
 // GetIndexPattern returns the index pattern for a given org
 func GetIndexPattern(orgID uuid.UUID) string {
 	return fmt.Sprintf("logs-%s-*", orgID.String())
-}
-
-// LogDocument represents a log document for Elasticsearch
-type LogDocument struct {
-	ID             string                 `json:"id"`
-	OrganizationID string                 `json:"organization_id"`
-	TenantID       string                 `json:"tenant_id"`
-	RecordType     int                    `json:"record_type"`
-	CreationTime   time.Time              `json:"creation_time"`
-	Operation      string                 `json:"operation"`
-	Workload       string                 `json:"workload"`
-	UserID         string                 `json:"user_id"`
-	ClientIP       string                 `json:"client_ip,omitempty"`
-	City           string                 `json:"city,omitempty"`
-	CountryCode    string                 `json:"country_code,omitempty"`
-	Location       *GeoPoint              `json:"location,omitempty"`
-	RawData        map[string]interface{} `json:"raw_data"`
-	IngestedAt     time.Time              `json:"ingested_at"`
-}
-
-// GeoPoint represents a geo_point for Elasticsearch
-type GeoPoint struct {
-	Lat float64 `json:"lat"`
-	Lon float64 `json:"lon"`
 }
 
 // AuditLogToDocument converts an AuditLog to a LogDocument

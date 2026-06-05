@@ -10,32 +10,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// SearchParams contains parameters for log search
-type SearchParams struct {
-	OrgID     uuid.UUID
-	TenantID  *uuid.UUID
-	StartTime *time.Time
-	EndTime   *time.Time
-	Query     string
-	Fuzzy     bool
-	Filters   []Filter
-	Size      int
-	From      int
-}
-
-// Filter represents a field filter
-type Filter struct {
-	Field    string `json:"field"`
-	Operator string `json:"operator"`
-	Value    string `json:"value"`
-}
-
-// SearchResult contains search results
-type SearchResult struct {
-	Total int64         `json:"total"`
-	Logs  []LogDocument `json:"logs"`
-}
-
 // SearchLogs searches for logs in Elasticsearch
 func SearchLogs(ctx context.Context, params SearchParams) (*SearchResult, error) {
 	if Client == nil {
@@ -209,27 +183,6 @@ func mapFieldName(field string) string {
 	default:
 		return field
 	}
-}
-
-// StatsResult contains aggregation results
-type StatsResult struct {
-	TotalLogs      int64            `json:"total_logs"`
-	TotalAlerts    int64            `json:"total_alerts"`
-	TopUsers       []BucketResult   `json:"top_users"`
-	TopOperations  []BucketResult   `json:"top_operations"`
-	VolumeHistory  []VolumeDataPoint `json:"volume_history"`
-}
-
-// BucketResult represents an aggregation bucket
-type BucketResult struct {
-	Key   string `json:"key"`
-	Count int64  `json:"count"`
-}
-
-// VolumeDataPoint represents a data point in volume history
-type VolumeDataPoint struct {
-	Time  time.Time `json:"time"`
-	Count int64     `json:"count"`
 }
 
 // GetStats retrieves statistics for an organization
