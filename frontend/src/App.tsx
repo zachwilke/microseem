@@ -152,7 +152,7 @@ function AppContent() {
                         <div className="animate-in fade-in duration-300 h-[calc(100vh-8rem)] flex flex-col">
                             <div className="mb-4">
                                 <h1 className="text-3xl font-bold text-white tracking-tight">Analytics</h1>
-                                <p className="text-slate-400 mt-2 font-light">Advanced analytics powered by Kibana.</p>
+                                <p className="text-slate-400 mt-2 font-light">Fast native analytics powered by ClickHouse and NATS JetStream.</p>
                             </div>
                             <KibanaEmbed />
                         </div>

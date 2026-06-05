@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-
-const API_URL = 'http://localhost:8080/api';
+import api from '../lib/api';
 
 interface Stats {
     total_24h: number;
@@ -20,7 +18,7 @@ const DashboardStats: React.FC = () => {
 
     const loadStats = async () => {
         try {
-            const res = await axios.get(`${API_URL}/stats`);
+            const res = await api.get('/stats');
             if (res.data) setStats(res.data);
         } catch (e) {
             console.error("Load stats error", e);

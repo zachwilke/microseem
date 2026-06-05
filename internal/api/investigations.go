@@ -10,9 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/socr/o365-monitor/internal/database"
-	"github.com/socr/o365-monitor/internal/elasticsearch"
 	"github.com/socr/o365-monitor/internal/middleware"
 	"github.com/socr/o365-monitor/internal/models"
+	"github.com/socr/o365-monitor/internal/store"
 )
 
 func RegisterInvestigationRoutes(r chi.Router) {
@@ -150,8 +150,8 @@ func ExportInvestigationCsv(w http.ResponseWriter, r *http.Request) {
 	var state FilterState
 	json.Unmarshal(inv.Filters, &state)
 
-	// Build ES search params
-	params := elasticsearch.SearchParams{
+	// Build log store search params
+	params := store.SearchParams{
 		OrgID: orgID,
 		Size:  10000, // Export limit
 	}
@@ -174,7 +174,7 @@ func ExportInvestigationCsv(w http.ResponseWriter, r *http.Request) {
 		if f.Value == "" {
 			continue
 		}
-		params.Filters = append(params.Filters, elasticsearch.Filter{
+		params.Filters = append(params.Filters, store.Filter{
 			Field:    f.Field,
 			Operator: f.Operator,
 			Value:    f.Value,
@@ -183,7 +183,7 @@ func ExportInvestigationCsv(w http.ResponseWriter, r *http.Request) {
 
 	// Execute search
 	ctx := context.Background()
-	result, err := elasticsearch.SearchLogs(ctx, params)
+	result, err := store.SearchLogs(ctx, params)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

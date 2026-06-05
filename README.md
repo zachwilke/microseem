@@ -42,6 +42,17 @@ The script will:
 
 Then open **http://localhost:3000** and register your first admin account!
 
+
+### Lightweight ClickHouse Preview
+
+To try the next-generation lightweight hot path without Elasticsearch, Kibana, or Kafka:
+
+```bash
+docker compose -f docker-compose.light.yml up -d --build
+```
+
+This preview uses `MICROSEEM_LOG_STORE=clickhouse` and `MICROSEEM_EVENT_BUS=nats`, publishing normalized events to NATS JetStream and mirroring them into ClickHouse for the current API query path.
+
 ### Manual Setup
 
 ```bash
@@ -82,6 +93,10 @@ MicroSeem supports three user roles with different permissions:
 | **Report Admin** | Read-only reports | View logs and analytics only |
 
 The first registered user automatically becomes an Admin.
+
+## Lightweight SIEM Scale-Out Direction
+
+MicroSeem's default prototype stack currently uses Kafka, Elasticsearch, and Kibana. The scale-out target is a lighter hot path built around NATS JetStream for durable event streaming and ClickHouse for high-speed security analytics, with optional Quickwit/Tantivy for full-text or cold-retention search. See [Performance Tooling Strategy](docs/performance-tooling.md) for the decision matrix, target architecture, and migration plan.
 
 ## Architecture
 

@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/socr/o365-monitor/internal/database"
-	"github.com/socr/o365-monitor/internal/elasticsearch"
 	"github.com/socr/o365-monitor/internal/middleware"
 	"github.com/socr/o365-monitor/internal/models"
+	"github.com/socr/o365-monitor/internal/store"
 )
 
 type StatsResponse struct {
@@ -41,9 +41,9 @@ func GetStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get stats from Elasticsearch
+	// Get stats from the active log store
 	ctx := context.Background()
-	esStats, err := elasticsearch.GetStats(ctx, orgID, tenantID)
+	logStats, err := store.GetStats(ctx, orgID, tenantID)
 	if err != nil {
 		// Fall back to empty stats on error
 		respondJSON(w, StatsResponse{})
@@ -51,28 +51,28 @@ func GetStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stats := StatsResponse{
-		Total24h:      esStats.TotalLogs,
+		Total24h:      logStats.TotalLogs,
 		TopUsers:      make([]CountItem, 0),
 		TopOperations: make([]CountItem, 0),
 		VolumeHistory: make([]VolumeItem, 0),
 	}
 
-	// Convert ES results to API format
-	for _, u := range esStats.TopUsers {
+	// Convert log store results to API format
+	for _, u := range logStats.TopUsers {
 		stats.TopUsers = append(stats.TopUsers, CountItem{
 			Key:   u.Key,
 			Count: u.Count,
 		})
 	}
 
-	for _, o := range esStats.TopOperations {
+	for _, o := range logStats.TopOperations {
 		stats.TopOperations = append(stats.TopOperations, CountItem{
 			Key:   o.Key,
 			Count: o.Count,
 		})
 	}
 
-	for _, v := range esStats.VolumeHistory {
+	for _, v := range logStats.VolumeHistory {
 		stats.VolumeHistory = append(stats.VolumeHistory, VolumeItem{
 			Time:  v.Time.Format("15:04"),
 			Count: v.Count,
